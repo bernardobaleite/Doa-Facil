@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- REBUILD: Renaming the menu item for better UX -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/nav_establishment_products"
+        android:icon="@drawable/ic_box_24dp"
+        android:title="Minhas Doações" />
+
+    <item
+        android:id="@+id/nav_add_product"
+        android:icon="@drawable/ic_list_add_24dp"
+        android:title="Doe Fácil" />
+
+    <item
+        android:id="@+id/nav_establishment_history"
+        android:icon="@drawable/ic_article_24dp"
+        android:title="Histórico" />
+
+    <item
+        android:id="@+id/nav_establishment_profile"
+        android:icon="@drawable/ic_account_24dp"
+        android:title="Perfil" />
+
+</menu>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The color state list for the Bottom Navigation View, as per the user's vision. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="@color/watergreen" />
+    <item android:color="@android:color/darker_gray" />
+</selector>

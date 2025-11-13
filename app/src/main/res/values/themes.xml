@@ -1,0 +1,54 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.DoaFacil" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="colorPrimary" type="color">@color/my_primary</item>
+        <item name="colorSecondary" type="color">@color/my_secondary</item>
+
+        <item name="colorControlHighlight">@color/watergreen</item>
+        
+        <!-- Status and Nav Bar -->
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+
+        <!-- Custom component styles -->
+        <item name="toolbarStyle">@style/Widget.App.Toolbar</item>
+        <item name="materialButtonStyle">@style/Widget.App.Button</item>
+    </style>
+
+    <style name="Theme.DoaFacil" parent="Base.Theme.DoaFacil" />
+
+    <!-- Toolbar Style (Default Light) -->
+    <style name="Widget.App.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="colorControlNormal">@android:color/darker_gray</item>
+        <item name="titleTextColor">@android:color/black</item>
+    </style>
+
+    <!-- Specific style for the green toolbar with white text/icons -->
+    <style name="Widget.App.Toolbar.Green" parent="Widget.App.Toolbar">
+        <item name="android:background">@color/watergreen</item>
+        <item name="titleTextColor">@android:color/white</item>
+        <item name="colorControlNormal">@android:color/white</item>
+    </style>
+
+    <style name="ShapeAppearance.App.CircleImageView" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+
+    <!-- THE FIX: The robust style for rounded square images. -->
+    <style name="ShapeAppearance.App.RoundedSquare" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">25dp</item>
+    </style>
+
+    <!-- Base style for Material3 buttons in the app -->
+    <style name="Widget.App.Button" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/watergreen</item>
+        <item name="android:textColor">@color/white</item>
+    </style>
+
+    <style name="defaultButton" parent="Widget.App.Button" />
+
+</resources>

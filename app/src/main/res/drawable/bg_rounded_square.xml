@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The custom rounded square background for the icon, as per the user's vision. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/watergreen" />
+    <corners android:radius="8dp" />
+</shape>

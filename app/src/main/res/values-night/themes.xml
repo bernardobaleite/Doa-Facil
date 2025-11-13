@@ -1,0 +1,23 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme for night mode. -->
+    <style name="Base.Theme.DoaFacil" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your dark theme here. -->
+        <item name="colorPrimary" type="color">@color/my_primary</item>
+        <item name="colorSecondary" type="color">@color/my_secondary</item>
+
+        <item name="colorControlHighlight">@color/watergreen</item>
+
+        <!-- Custom component styles -->
+        <item name="toolbarStyle">@style/Widget.App.Toolbar</item>
+        <item name="materialButtonStyle">@style/Widget.App.Button</item>
+    </style>
+
+    <!-- THE FIX: A theme overlay for light toolbars with dark controls -->
+    <style name="ThemeOverlay.App.Toolbar.Light" parent="ThemeOverlay.AppCompat.Light" />
+
+    <!-- A theme overlay for dark toolbars with white controls -->
+    <style name="ThemeOverlay.App.Toolbar.Dark" parent="ThemeOverlay.AppCompat.Dark.ActionBar">
+        <item name="colorControlNormal">@color/white</item>
+        <item name="titleTextColor">@color/white</item>
+    </style>
+</resources>

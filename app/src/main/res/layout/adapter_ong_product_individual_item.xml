@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- THE GREAT RESET 2.0: Removing the incorrect image and simplifying the sub-item layout as per user's true vision. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:background="?attr/selectableItemBackground">
+
+    <TextView
+        android:id="@+id/origin_quantity"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/black"
+        android:textStyle="bold"
+        tools:text="Quantidade: 10 Kg" />
+
+    <TextView
+        android:id="@+id/origin_expiration"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        tools:text="Validade: 25/12/2024" />
+
+</LinearLayout>

@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">Doa Facil</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="search_hint">Pesquisar produtos...</string>
+
+    <!-- THE FIX: Added missing string resources for OngProductItemAdapter -->
+    <string name="quantity_format">Quantidade: %s</string>
+    <string name="expiration_format">Validade: %s</string>
+
+    <plurals name="available_origins">
+        <item quantity="one">%d origem disponível</item>
+        <item quantity="other">%d origens disponíveis</item>
+    </plurals>
+
+    <!-- Plural resource for items added to cart -->
+    <plurals name="cart_origins_added">
+        <item quantity="one">%d origem adicionada</item>
+        <item quantity="other">%d origens adicionadas</item>
+    </plurals>
+
+</resources>

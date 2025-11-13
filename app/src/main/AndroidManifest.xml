@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.DoaFacil">
+
+        <!-- RE-ARCH: Declaring the new OngCartActivity to fix the crash. -->
+        <activity
+            android:name="activity.OngCartActivity"
+            android:exported="false" />
+
+        <activity
+            android:name="activity.AdministratorActivity"
+            android:exported="false" />
+        <activity
+            android:name="activity.OngProductsActivity"
+            android:exported="false" />
+        <activity
+            android:name="activity.OngActivity"
+            android:exported="false" />
+        <activity
+            android:name="activity.ConfigurationsOngActivity"
+            android:exported="false"
+            android:parentActivityName="activity.OngProductsActivity" />
+        <activity
+            android:name="activity.NewProductEstablishmentActivity"
+            android:exported="false"
+            android:parentActivityName="activity.EstablishmentActivity"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="activity.ConfigurationsEstablishmentActivity"
+            android:exported="false"
+            android:parentActivityName="activity.EstablishmentActivity" />
+        <activity
+            android:name="activity.EstablishmentActivity"
+            android:exported="false" />
+        <activity
+            android:name="activity.AuthenticationActivity"
+            android:exported="false" />
+        <activity
+            android:name="activity.SplashActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="grey">#FF666666</color>
+    <color name="my_primary">#9FDDC5</color>
+    <color name="my_secondary">#9FDDC5</color>
+    <color name="transparent">#00000000</color>
+
+
+    <color name="watergreen">#9cd4c0</color>
+    <color name="watergreen2">#9FCB90</color>
+    <color name="yellow">#FAF5D5</color>
+    
+    <!-- THE FIX: Added colors for status states -->
+    <color name="status_red">#D32F2F</color>
+    <color name="status_warning_yellow">#FFC107</color>
+</resources>
