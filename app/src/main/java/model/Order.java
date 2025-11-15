@@ -1,18 +1,16 @@
 package model;
 
-import java.util.List;
 import java.util.Map;
 
-// RE-ARCH: Using a Map for items to ensure correct Firebase serialization.
-public class  Order {
+// ARCHITECTURE: Aligning Order with the user's superior data model.
+public class Order {
 
     private String orderId;
     private String ongId;
-    private String status;
-    private long timestamp;
-    private Map<String, ItemDisplay> items; // THE FIX
-    private String scheduledDate;
-    private String scheduledTime;
+    private String orderStatus;
+    private long orderCreatedAt;
+    private String orderScheduledDateTime;
+    private Map<String, OrderItem> orderItems;
 
     public Order() {
     }
@@ -35,43 +33,35 @@ public class  Order {
         this.ongId = ongId;
     }
 
-    public String getStatus() {
-        return status;
+    public String getOrderStatus() {
+        return orderStatus;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
+    public void setOrderStatus(String orderStatus) {
+        this.orderStatus = orderStatus;
     }
 
-    public long getTimestamp() {
-        return timestamp;
+    public long getOrderCreatedAt() {
+        return orderCreatedAt;
     }
 
-    public void setTimestamp(long timestamp) {
-        this.timestamp = timestamp;
+    public void setOrderCreatedAt(long orderCreatedAt) {
+        this.orderCreatedAt = orderCreatedAt;
     }
 
-    public Map<String, ItemDisplay> getItems() {
-        return items;
+    public String getOrderScheduledDateTime() {
+        return orderScheduledDateTime;
     }
 
-    public void setItems(Map<String, ItemDisplay> items) {
-        this.items = items;
+    public void setOrderScheduledDateTime(String orderScheduledDateTime) {
+        this.orderScheduledDateTime = orderScheduledDateTime;
     }
 
-    public String getScheduledDate() {
-        return scheduledDate;
+    public Map<String, OrderItem> getOrderItems() {
+        return orderItems;
     }
 
-    public void setScheduledDate(String scheduledDate) {
-        this.scheduledDate = scheduledDate;
-    }
-
-    public String getScheduledTime() {
-        return scheduledTime;
-    }
-
-    public void setScheduledTime(String scheduledTime) {
-        this.scheduledTime = scheduledTime;
+    public void setOrderItems(Map<String, OrderItem> orderItems) {
+        this.orderItems = orderItems;
     }
 }

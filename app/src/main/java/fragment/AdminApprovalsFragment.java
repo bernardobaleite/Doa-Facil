@@ -16,6 +16,7 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.ValueEventListener;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,29 +24,37 @@ import java.util.Map;
 import activity.AdministratorActivity;
 import adapter.AdminApprovalAdapter;
 import helper.ConfigurationFirebase;
-import model.ItemDisplay;
-import model.Product;
+import model.ProfileEstablishment;
+import model.ReceivedDonation;
 import model.StockItem;
 
-// RE-ARCH: Refactoring to use the new decoupled toolbar control from AdministratorActivity.
+// RE-DESIGN: Changing the screen title as per user's final specification.
 public class AdminApprovalsFragment extends Fragment {
 
-    private static class ProfileData {
-        String establishmentName;
-        String establishmentAddress;
+    public static class AdminApprovalItem {
+        public final ReceivedDonation donation;
+        public final String establishmentName;
+        public final String establishmentAddress;
+        public final String effectiveStatus;
+
+        public AdminApprovalItem(ReceivedDonation donation, String establishmentName, String establishmentAddress, String effectiveStatus) {
+            this.donation = donation;
+            this.establishmentName = establishmentName;
+            this.establishmentAddress = establishmentAddress;
+            this.effectiveStatus = effectiveStatus;
+        }
     }
 
     private RecyclerView recyclerApproval;
     private AdminApprovalAdapter adapter;
-    private List<ItemDisplay> itemList = new ArrayList<>();
     private DatabaseReference databaseRef;
-    private ValueEventListener stockItemsListener;
+    
+    private ValueEventListener donationsListener, stockItemsListener, profilesListener;
+    private DatabaseReference donationsRef, stockItemsRef, profilesRef;
 
-    private Map<String, ProfileData> establishmentProfileMap = new HashMap<>();
-    private Map<String, Product> productCatalogMap = new HashMap<>();
-
-    public AdminApprovalsFragment() {
-    }
+    private final List<ReceivedDonation> allDonations = new ArrayList<>();
+    private final Map<String, StockItem> stockItemsByDonationId = new HashMap<>();
+    private final Map<String, ProfileEstablishment> establishmentProfileMap = new HashMap<>();
 
     @Nullable
     @Override
@@ -56,135 +65,111 @@ public class AdminApprovalsFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-
         recyclerApproval = view.findViewById(R.id.recycler_admin_approval);
         databaseRef = ConfigurationFirebase.getFirebaseDatabase();
+        
+        donationsRef = databaseRef.child("received_donations");
+        stockItemsRef = databaseRef.child("stock_items");
+        profilesRef = databaseRef.child("establishment_profiles");
 
         recyclerApproval.setLayoutManager(new LinearLayoutManager(getContext()));
         recyclerApproval.setHasFixedSize(true);
-        adapter = new AdminApprovalAdapter(itemList, getContext());
+        
+        adapter = new AdminApprovalAdapter(new ArrayList<>(), getContext());
         recyclerApproval.setAdapter(adapter);
-
-        loadEstablishmentProfiles();
     }
     
     @Override
     public void onResume() {
         super.onResume();
-        // THE FIX: Set the toolbar title using the new decoupled method.
         if (getActivity() instanceof AdministratorActivity) {
-            ((AdministratorActivity) getActivity()).setToolbarTitle("Aprovações Pendentes", AdministratorActivity.TitleAlignment.CENTER);
+            // THE FIX: Set the correct title for the screen.
+            ((AdministratorActivity) getActivity()).setToolbarTitle("Painel de Coletas", AdministratorActivity.TitleAlignment.CENTER);
         }
+        loadAllData();
     }
 
-    private void loadEstablishmentProfiles() {
-        DatabaseReference profilesRef = databaseRef.child("establishment_profiles");
-        profilesRef.addListenerForSingleValueEvent(new ValueEventListener() {
+    private void loadAllData() {
+        profilesListener = profilesRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 establishmentProfileMap.clear();
                 for (DataSnapshot ds : snapshot.getChildren()) {
-                    String establishmentName = ds.child("establishmentName").getValue(String.class);
-                    String establishmentAddress = ds.child("establishmentAddress").getValue(String.class);
-
-                    if (establishmentName != null) {
-                        ProfileData profile = new ProfileData();
-                        profile.establishmentName = establishmentName;
-                        profile.establishmentAddress = establishmentAddress;
-                        establishmentProfileMap.put(ds.getKey(), profile);
-                    }
+                    ProfileEstablishment profile = ds.getValue(ProfileEstablishment.class);
+                    if (profile != null) establishmentProfileMap.put(ds.getKey(), profile);
                 }
-                loadProductCatalog();
+                combineDataAndRefreshUI();
             }
-
             @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) {
-                    Toast.makeText(getContext(), "Falha ao carregar perfis.", Toast.LENGTH_SHORT).show();
-                }
-            }
+            public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar perfis."); }
         });
-    }
 
-    private void loadProductCatalog() {
-        DatabaseReference catalogRef = databaseRef.child("establishment_product_catalog");
-        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
+        stockItemsListener = stockItemsRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
-                productCatalogMap.clear();
+                stockItemsByDonationId.clear();
                 for (DataSnapshot ds : snapshot.getChildren()) {
-                    Product product = ds.getValue(Product.class);
-                    if (product != null) {
-                        String productId = ds.getKey();
-                        product.setProductId(productId);
-                        productCatalogMap.put(productId, product);
+                    StockItem item = ds.getValue(StockItem.class);
+                    if (item != null && item.getDonationId() != null) {
+                        stockItemsByDonationId.put(item.getDonationId(), item);
                     }
                 }
-                listenForAllStockItems();
+                combineDataAndRefreshUI();
             }
-
             @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                 if (getContext() != null) {
-                    Toast.makeText(getContext(), "Falha ao carregar catálogo.", Toast.LENGTH_SHORT).show();
+            public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar estoque."); }
+        });
+
+        donationsListener = donationsRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                allDonations.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    allDonations.add(ds.getValue(ReceivedDonation.class));
                 }
+                combineDataAndRefreshUI();
             }
+            @Override
+            public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar doações."); }
         });
     }
 
-    private void listenForAllStockItems() {
-        DatabaseReference stockRef = databaseRef.child("stock_items");
-        stockItemsListener = stockRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                itemList.clear();
-                for (DataSnapshot userDs : snapshot.getChildren()) {
-                    String userId = userDs.getKey();
-                    ProfileData profile = establishmentProfileMap.get(userId);
+    private void combineDataAndRefreshUI() {
+        List<AdminApprovalItem> processedList = new ArrayList<>();
+        for (ReceivedDonation donation : allDonations) {
+            if (donation == null) continue;
 
-                    for (DataSnapshot itemDs : userDs.getChildren()) {
-                        StockItem stockItem = itemDs.getValue(StockItem.class);
-                        if (stockItem != null) {
-                            Product productDetails = productCatalogMap.get(stockItem.getProductId());
-                            if (productDetails != null) {
-                                ItemDisplay displayItem = new ItemDisplay();
-                                displayItem.setEstablishmentId(userId);
-                                displayItem.setStockItemId(itemDs.getKey());
-                                displayItem.setStockItemStatus(stockItem.getStockItemStatus());
-                                displayItem.setProductName(productDetails.getProductName());
-                                displayItem.setProductUnitType(productDetails.getProductUnitType());
-                                
-                                if (profile != null) {
-                                    displayItem.setEstablishmentName(profile.establishmentName);
-                                    displayItem.setEstablishmentAddress(profile.establishmentAddress);
-                                } else {
-                                    displayItem.setEstablishmentName("Nome Desconhecido");
-                                }
-
-                                displayItem.setStockItemQuantity(stockItem.getStockItemQuantity());
-                                displayItem.setStockItemExpirationDate(stockItem.getStockItemExpirationDate());
-                                itemList.add(displayItem);
-                            }
-                        }
-                    }
-                }
-                adapter.notifyDataSetChanged();
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) {
-                    Toast.makeText(getContext(), "Falha ao carregar itens de estoque.", Toast.LENGTH_SHORT).show();
+            String effectiveStatus = donation.getReceivedStatus();
+            
+            if ("Doação coletada".equals(effectiveStatus)) {
+                StockItem correspondingStockItem = stockItemsByDonationId.get(donation.getDonationId());
+                if (correspondingStockItem != null && "Removido do estoque".equals(correspondingStockItem.getStockItemStatus())) {
+                    effectiveStatus = "Removido do estoque";
                 }
             }
-        });
+
+            ProfileEstablishment profile = establishmentProfileMap.get(donation.getEstablishmentId());
+            String establishmentName = (profile != null) ? profile.getEstablishmentName() : "Nome Desconhecido";
+            String establishmentAddress = (profile != null) ? profile.getEstablishmentAddress() : "";
+
+            processedList.add(new AdminApprovalItem(donation, establishmentName, establishmentAddress, effectiveStatus));
+        }
+
+        Collections.reverse(processedList); 
+        adapter.setData(processedList);
+    }
+
+    private void showToast(String message) {
+        if (getContext() != null) {
+            Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
     public void onStop() {
         super.onStop();
-        if (stockItemsListener != null) {
-            databaseRef.child("stock_items").removeEventListener(stockItemsListener);
-        }
+        if (donationsListener != null) donationsRef.removeEventListener(donationsListener);
+        if (stockItemsListener != null) stockItemsRef.removeEventListener(stockItemsListener);
+        if (profilesListener != null) profilesRef.removeEventListener(profilesListener);
     }
 }

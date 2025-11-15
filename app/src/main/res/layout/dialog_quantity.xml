@@ -23,7 +23,7 @@
         android:layout_marginBottom="24dp"
         android:hint="Ex: 10"
         android:inputType="numberDecimal"
-        android:textColor="@color/watergreen"
+        android:textColor="@color/black"
         android:textColorHint="@android:color/darker_gray" />
 
     <LinearLayout

@@ -48,6 +48,7 @@
                 android:id="@+id/text_order_id_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:paddingTop="2dp"
                 android:text="Ordem de pedido: "
                 android:textColor="@color/black"
                 android:textSize="12sp"
@@ -60,11 +61,12 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
+                android:paddingTop="2dp"
                 android:textColor="@color/grey"
                 android:textSize="12sp"
                 app:layout_constraintBaseline_toBaselineOf="@id/text_order_id_label"
-                app:layout_constraintStart_toEndOf="@id/text_order_id_label"
                 app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@id/text_order_id_label"
                 tools:text="#12345xyz" />
 
             <TextView
@@ -230,7 +232,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 tools:itemCount="2"
-                tools:listitem="@layout/adapter_order_product_item"/>
+                tools:listitem="@layout/adapter_ong_order"/>
 
         </LinearLayout>
 

@@ -21,8 +21,6 @@ import com.company.doafacil.R;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.MutableData;
-import com.google.firebase.database.Transaction;
 import com.google.firebase.database.ValueEventListener;
 
 import java.util.ArrayList;
@@ -36,21 +34,53 @@ import activity.OngActivity;
 import adapter.OngProductAdapter;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
-import model.GroupedProduct;
-import model.ItemDisplay;
+import model.OrderItem;
 import model.Product;
 import model.StockItem;
 
-// RE-ARCH: Reverting the toolbar icon to be a shortcut to the cart tab.
+// RE-ARCH: Fixing the fragment lifecycle to ensure data is always fresh.
 public class OngListProductsFragment extends Fragment implements OngProductAdapter.ProductInteractionListener {
+
+    public static class AggregatedStockItem {
+        private final String expirationDate;
+        private double totalQuantity;
+        private final List<StockItem> originalItems = new ArrayList<>();
+
+        public AggregatedStockItem(String expirationDate) {
+            this.expirationDate = expirationDate;
+        }
+        public void addStockItem(StockItem item) {
+            this.originalItems.add(item);
+            this.totalQuantity += item.getStockItemQuantity();
+        }
+        public String getExpirationDate() { return expirationDate; }
+        public double getTotalQuantity() { return totalQuantity; }
+        public List<StockItem> getOriginalItems() { return originalItems; }
+    }
+
+    public static class GroupedStockItem {
+        private final String productName;
+        private final String productUnitType;
+        private final List<AggregatedStockItem> aggregatedItems;
+
+        public GroupedStockItem(String productName, String productUnitType, List<AggregatedStockItem> aggregatedItems) {
+            this.productName = productName;
+            this.productUnitType = productUnitType;
+            this.aggregatedItems = aggregatedItems;
+        }
+        public String getProductName() { return productName; }
+        public String getProductUnitType() { return productUnitType; }
+        public List<AggregatedStockItem> getItems() { return aggregatedItems; }
+    }
 
     private RecyclerView recyclerProducts;
     private TextView textEmptyProducts;
     private OngProductAdapter adapter;
-    private List<GroupedProduct> fullProductList = new ArrayList<>();
+    private List<GroupedStockItem> fullProductList = new ArrayList<>();
     private DatabaseReference databaseRef;
     private ValueEventListener stockItemsListener;
     private Map<String, Product> productCatalogMap = new HashMap<>();
+    private String currentOngId;
 
     @Nullable
     @Override
@@ -73,97 +103,160 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
         adapter = new OngProductAdapter(requireActivity(), this);
         recyclerProducts.setAdapter(adapter);
 
-        loadProductCatalog();
+        currentOngId = UserFirebase.getIdUser();
     }
 
     @Override
-    public void onAddToCart(ItemDisplay item, int quantity) {
-        String ongId = UserFirebase.getIdUser();
-        if (ongId == null || ongId.isEmpty()) {
-            Toast.makeText(getContext(), "Erro: Usuário não identificado. Faça login novamente.", Toast.LENGTH_LONG).show();
+    public void onAddToCart(List<OrderItem> items) {
+        if (currentOngId == null || currentOngId.isEmpty()) {
+            Toast.makeText(getContext(), "Erro: Usuário não identificado.", Toast.LENGTH_LONG).show();
             return;
         }
+        
+        DatabaseReference cartRef = ConfigurationFirebase.getFirebaseDatabase().child("shopping_carts").child(currentOngId);
+        Map<String, Object> cartUpdates = new HashMap<>();
 
-        DatabaseReference stockItemRef = ConfigurationFirebase.getFirebaseDatabase()
-                .child("stock_items")
-                .child(item.getEstablishmentId())
-                .child(item.getStockItemId());
-
-        stockItemRef.runTransaction(new Transaction.Handler() {
-            @NonNull
-            @Override
-            public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
-                StockItem stockItem = mutableData.getValue(StockItem.class);
-                if (stockItem == null || stockItem.getStockItemQuantity() < quantity) {
-                    return Transaction.abort();
-                }
-
-                double newQuantity = stockItem.getStockItemQuantity() - quantity;
-                if (newQuantity > 0) {
-                    stockItem.setStockItemQuantity(newQuantity);
-                    mutableData.setValue(stockItem);
-                } else {
-                    mutableData.setValue(null);
-                }
-                return Transaction.success(mutableData);
+        for (OrderItem item : items) {
+            Product productDetails = productCatalogMap.get(item.getProductId());
+            if (productDetails != null) {
+                item.setProductName(productDetails.getProductName());
+                item.setProductUnitType(productDetails.getProductUnitType());
             }
+            cartUpdates.put(item.getStockItemId(), item);
+        }
 
+        cartRef.updateChildren(cartUpdates).addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                Toast.makeText(getContext(), "Itens adicionados ao carrinho!", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getContext(), "Falha ao adicionar ao carrinho.", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+    
+    private void loadProductCatalog() {
+        DatabaseReference catalogRef = databaseRef.child("establishment_product_catalog");
+        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
-            public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot currentData) {
-                if (error != null) {
-                    Toast.makeText(getContext(), "Falha ao atualizar o estoque: " + error.getMessage(), Toast.LENGTH_SHORT).show();
-                } else if (committed) {
-                    DatabaseReference cartItemRef = ConfigurationFirebase.getFirebaseDatabase()
-                            .child("shopping_carts")
-                            .child(ongId)
-                            .child(item.getStockItemId());
-
-                    cartItemRef.runTransaction(new Transaction.Handler() {
-                        @NonNull
-                        @Override
-                        public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
-                            ItemDisplay currentCartItem = mutableData.getValue(ItemDisplay.class);
-                            if (currentCartItem == null) {
-                                ItemDisplay newCartItem = item;
-                                newCartItem.setStockItemQuantity(quantity);
-                                mutableData.setValue(newCartItem);
-                            } else {
-                                double newTotalQuantity = currentCartItem.getStockItemQuantity() + quantity;
-                                currentCartItem.setStockItemQuantity(newTotalQuantity);
-                                mutableData.setValue(currentCartItem);
-                            }
-                            return Transaction.success(mutableData);
-                        }
-
-                        @Override
-                        public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot currentData) {
-                            if (committed) {
-                                Toast.makeText(getContext(), "Carrinho atualizado!", Toast.LENGTH_SHORT).show();
-                            } else if (error != null) {
-                                Toast.makeText(getContext(), "Falha ao atualizar carrinho: " + error.getMessage(), Toast.LENGTH_LONG).show();
-                            }
-                        }
-                    });
-                } else {
-                    Toast.makeText(getContext(), "Conflito de estoque. Tente novamente.", Toast.LENGTH_SHORT).show();
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                productCatalogMap.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    Product product = ds.getValue(Product.class);
+                    if (product != null) {
+                        product.setProductId(ds.getKey());
+                        productCatalogMap.put(product.getProductId(), product);
+                    }
                 }
+                listenForAvailableItems();
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                if (getContext() != null) Toast.makeText(getContext(), "Falha ao carregar catálogo: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                updateViewVisibility(true);
             }
         });
     }
 
+    private void listenForAvailableItems() {
+        DatabaseReference stockRef = databaseRef.child("stock_items");
+        if (stockItemsListener != null) { 
+            stockRef.removeEventListener(stockItemsListener);
+        }
+        stockItemsListener = stockRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                Map<String, List<StockItem>> groupedByProduct = new HashMap<>();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    StockItem stockItem = ds.getValue(StockItem.class);
+                    if (stockItem != null && "Disponível".equals(stockItem.getStockItemStatus()) && stockItem.getStockItemQuantity() > 0) {
+                        groupedByProduct.computeIfAbsent(stockItem.getProductId(), k -> new ArrayList<>()).add(stockItem);
+                    }
+                }
+
+                fullProductList.clear();
+                for (Map.Entry<String, List<StockItem>> entry : groupedByProduct.entrySet()) {
+                    String productId = entry.getKey();
+                    Product productDetails = productCatalogMap.get(productId);
+                    if (productDetails != null) {
+                        Map<String, AggregatedStockItem> aggregatedMap = new HashMap<>();
+                        for(StockItem item : entry.getValue()){
+                            String expirationDate = item.getStockItemExpirationDate();
+                            aggregatedMap.computeIfAbsent(expirationDate, k -> new AggregatedStockItem(k)).addStockItem(item);
+                        }
+
+                        List<AggregatedStockItem> aggregatedList = new ArrayList<>(aggregatedMap.values());
+                        Collections.sort(aggregatedList, (o1, o2) -> o1.getExpirationDate().compareTo(o2.getExpirationDate()));
+
+                        GroupedStockItem newGroup = new GroupedStockItem(
+                            productDetails.getProductName(),
+                            productDetails.getProductUnitType(),
+                            aggregatedList
+                        );
+                        fullProductList.add(newGroup);
+                    }
+                }
+                
+                Collections.sort(fullProductList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
+                
+                adapter.setData(new ArrayList<>(fullProductList));
+                updateViewVisibility(fullProductList.isEmpty());
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                if(getContext() != null) Toast.makeText(getContext(), "Falha ao carregar estoque: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                updateViewVisibility(true);
+            }
+        });
+    }
+
+    // THE FIX: Attach listeners in onResume to get fresh data.
     @Override
     public void onResume() {
         super.onResume();
         if (getActivity() instanceof OngActivity) {
             ((OngActivity) getActivity()).setToolbarTitle("Produtos Disponíveis", OngActivity.TitleAlignment.LEFT);
         }
+        if (currentOngId != null) {
+            loadProductCatalog(); // Starts the listener chain
+        } else {
+            Toast.makeText(getContext(), "Erro: Usuário não autenticado.", Toast.LENGTH_LONG).show();
+            updateViewVisibility(true);
+        }
     }
 
+    // THE FIX: Detach listeners in onStop to prevent leaks and unnecessary background updates.
     @Override
     public void onStop() {
         super.onStop();
         if (stockItemsListener != null && databaseRef != null) {
             databaseRef.child("stock_items").removeEventListener(stockItemsListener);
+        }
+        // Note: The catalog listener is a single-value-event listener and does not need to be removed.
+    }
+
+    private void filter(String text) {
+        List<GroupedStockItem> filteredList = new ArrayList<>();
+        if (text.isEmpty()) {
+            filteredList.addAll(fullProductList);
+        } else {
+            text = text.toLowerCase(Locale.ROOT);
+            for (GroupedStockItem group : fullProductList) {
+                if (group.getProductName().toLowerCase(Locale.ROOT).contains(text)) {
+                    filteredList.add(group);
+                }
+            }
+        }
+        adapter.setData(filteredList);
+        updateViewVisibility(filteredList.isEmpty());
+    }
+
+    private void updateViewVisibility(boolean isEmpty) {
+        if (isEmpty) {
+            textEmptyProducts.setVisibility(View.VISIBLE);
+            recyclerProducts.setVisibility(View.GONE);
+        } else {
+            textEmptyProducts.setVisibility(View.GONE);
+            recyclerProducts.setVisibility(View.VISIBLE);
         }
     }
 
@@ -185,7 +278,6 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
                 }
                 return true;
             }
-
             @Override
             public boolean onMenuItemActionCollapse(MenuItem item) {
                 if (getActivity() instanceof OngActivity) {
@@ -200,7 +292,6 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
             public boolean onQueryTextSubmit(String query) {
                 return false;
             }
-
             @Override
             public boolean onQueryTextChange(String newText) {
                 filter(newText);
@@ -209,112 +300,11 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
         });
 
         MenuItem cartItem = menu.findItem(R.id.menuCart);
-        // THE FIX: The toolbar icon is now a shortcut to the cart tab.
         cartItem.setOnMenuItemClickListener(item -> {
             if (getActivity() instanceof OngActivity) {
                 ((OngActivity) getActivity()).navigateToCart();
             }
             return true;
         });
-    }
-
-    private void filter(String text) {
-        List<GroupedProduct> filteredList = new ArrayList<>();
-        if (text.isEmpty()) {
-            filteredList.addAll(fullProductList);
-        } else {
-            text = text.toLowerCase(Locale.ROOT);
-            for (GroupedProduct group : fullProductList) {
-                if (group.getProductName().toLowerCase(Locale.ROOT).contains(text)) {
-                    filteredList.add(group);
-                }
-            }
-        }
-        adapter.setData(filteredList);
-        updateViewVisibility(filteredList.isEmpty());
-    }
-
-    private void loadProductCatalog() {
-        DatabaseReference catalogRef = databaseRef.child("establishment_product_catalog");
-        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                productCatalogMap.clear();
-                for (DataSnapshot ds : snapshot.getChildren()) {
-                    Product product = ds.getValue(Product.class);
-                    if (product != null) {
-                        product.setProductId(ds.getKey());
-                        productCatalogMap.put(ds.getKey(), product);
-                    }
-                }
-                listenForAvailableItems();
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) Toast.makeText(getContext(), "Falha ao carregar catálogo.", Toast.LENGTH_SHORT).show();
-                updateViewVisibility(true);
-            }
-        });
-    }
-
-    private void listenForAvailableItems() {
-        DatabaseReference stockRef = databaseRef.child("stock_items");
-        stockItemsListener = stockRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                Map<String, List<ItemDisplay>> groupedMap = new HashMap<>();
-
-                for (DataSnapshot userDs : snapshot.getChildren()) {
-                    for (DataSnapshot itemDs : userDs.getChildren()) {
-                        StockItem stockItem = itemDs.getValue(StockItem.class);
-                        if (stockItem != null && "Doação Coletada".equals(stockItem.getStockItemStatus())) {
-                            Product productDetails = productCatalogMap.get(stockItem.getProductId());
-                            if (productDetails != null) {
-                                ItemDisplay displayItem = new ItemDisplay();
-                                displayItem.setEstablishmentId(userDs.getKey());
-                                displayItem.setStockItemId(itemDs.getKey());
-                                displayItem.setProductName(productDetails.getProductName());
-                                displayItem.setProductUnitType(productDetails.getProductUnitType());
-                                displayItem.setStockItemQuantity(stockItem.getStockItemQuantity());
-                                displayItem.setStockItemExpirationDate(stockItem.getStockItemExpirationDate());
-                                displayItem.setProductId(stockItem.getProductId());
-
-                                String productName = productDetails.getProductName();
-                                List<ItemDisplay> itemsForProduct = groupedMap.computeIfAbsent(productName, k -> new ArrayList<>());
-                                itemsForProduct.add(displayItem);
-                            }
-                        }
-                    }
-                }
-
-                fullProductList.clear();
-                for (Map.Entry<String, List<ItemDisplay>> entry : groupedMap.entrySet()) {
-                    GroupedProduct newGroup = new GroupedProduct(entry.getKey(), entry.getValue());
-                    fullProductList.add(newGroup);
-                }
-                
-                Collections.sort(fullProductList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
-                
-                adapter.setData(new ArrayList<>(fullProductList));
-                updateViewVisibility(fullProductList.isEmpty());
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if(getContext() != null) Toast.makeText(getContext(), "Falha ao carregar doações.", Toast.LENGTH_SHORT).show();
-                updateViewVisibility(true);
-            }
-        });
-    }
-
-    private void updateViewVisibility(boolean isEmpty) {
-        if (isEmpty) {
-            textEmptyProducts.setVisibility(View.VISIBLE);
-            recyclerProducts.setVisibility(View.GONE);
-        } else {
-            textEmptyProducts.setVisibility(View.GONE);
-            recyclerProducts.setVisibility(View.VISIBLE);
-        }
     }
 }

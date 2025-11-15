@@ -1,12 +1,10 @@
 package fragment;
 
-import android.content.DialogInterface;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -19,7 +17,8 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.ServerValue;
+import com.google.firebase.database.MutableData;
+import com.google.firebase.database.Transaction;
 import com.google.firebase.database.ValueEventListener;
 
 import java.util.ArrayList;
@@ -27,28 +26,48 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import activity.OngActivity;
 import adapter.OngCartAdapter;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
 import model.GroupedProduct;
-import model.ItemDisplay;
+import model.Order;
+import model.OrderItem;
 import model.Product;
+import model.StockItem;
 
-// RE-DEBUG: Implementing user's strategy to display the detailed Firebase error on failure.
+// RE-ARCH: Implementing a fully reactive, multi-listener architecture to prevent race conditions.
 public class OngCartFragment extends Fragment {
+
+    public static class CartDisplayItem {
+        public final StockItem stockItem;
+        public final OrderItem orderItem;
+        public final Product productDetails;
+
+        public CartDisplayItem(StockItem stockItem, OrderItem orderItem, Product productDetails) {
+            this.stockItem = stockItem;
+            this.orderItem = orderItem;
+            this.productDetails = productDetails;
+        }
+
+        public String getProductName() {
+            return productDetails != null ? productDetails.getProductName() : "Produto Desconhecido";
+        }
+    }
 
     private RecyclerView recyclerCart;
     private OngCartAdapter adapter;
     private FloatingActionButton fabConfirmOrder;
 
-    private DatabaseReference cartRef;
-    private ValueEventListener cartListener;
+    private DatabaseReference dbRef;
+    private ValueEventListener cartListener, catalogListener, stockListener;
     private String currentOngId;
 
+    private List<OrderItem> cartPointers = new ArrayList<>();
     private Map<String, Product> productCatalogMap = new HashMap<>();
-    private List<ItemDisplay> currentCartItems = new ArrayList<>();
+    private Map<String, StockItem> allStockItemsMap = new HashMap<>();
 
     @Nullable
     @Override
@@ -59,16 +78,11 @@ public class OngCartFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-
-        recyclerCart = view.findViewById(R.id.recycler_cart_items);
-        fabConfirmOrder = view.findViewById(R.id.fab_confirm_order);
-        
-        recyclerCart.setLayoutManager(new LinearLayoutManager(getContext()));
-        adapter = new OngCartAdapter(getContext(), new ArrayList<>());
-        recyclerCart.setAdapter(adapter);
+        initializeComponents(view);
+        dbRef = ConfigurationFirebase.getFirebaseDatabase();
 
         fabConfirmOrder.setOnClickListener(v -> {
-            if (currentCartItems.isEmpty()) {
+            if (cartPointers.isEmpty()) {
                 Toast.makeText(getContext(), "Seu carrinho está vazio.", Toast.LENGTH_SHORT).show();
             } else {
                 showConfirmOrderDialog();
@@ -77,75 +91,19 @@ public class OngCartFragment extends Fragment {
 
         currentOngId = UserFirebase.getIdUser();
         if (currentOngId != null) {
-            cartRef = ConfigurationFirebase.getFirebaseDatabase().child("shopping_carts").child(currentOngId);
-            loadProductCatalog();
-        }
-    }
-    
-    private void showConfirmOrderDialog(){
-        new AlertDialog.Builder(requireContext())
-            .setTitle("Confirmar Pedido")
-            .setMessage("Deseja confirmar o pedido?")
-            .setPositiveButton("Confirmar", (dialog, which) -> confirmOrder())
-            .setNegativeButton("Cancelar", null)
-            .show();
-    }
-
-    private void confirmOrder() {
-        if (currentOngId == null || currentCartItems.isEmpty()) {
-            Toast.makeText(getContext(), "Erro: Não foi possível confirmar o pedido.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        DatabaseReference databaseRef = ConfigurationFirebase.getFirebaseDatabase();
-        String orderId = databaseRef.child("orders").child(currentOngId).push().getKey();
-
-        if (orderId == null) {
-            Toast.makeText(getContext(), "Erro ao gerar ID do pedido.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Map<String, ItemDisplay> itemsMap = new HashMap<>();
-        for (ItemDisplay item : currentCartItems) {
-            itemsMap.put(item.getStockItemId(), item);
-        }
-
-        Map<String, Object> orderData = new HashMap<>();
-        orderData.put("status", "Realize o agendamento");
-        orderData.put("timestamp", ServerValue.TIMESTAMP);
-        orderData.put("items", itemsMap);
-        orderData.put("ongId", currentOngId);
-        orderData.put("orderId", orderId);
-
-        Map<String, Object> childUpdates = new HashMap<>();
-        childUpdates.put("/orders/" + currentOngId + "/" + orderId, orderData);
-        childUpdates.put("/shopping_carts/" + currentOngId, null);
-
-        databaseRef.updateChildren(childUpdates).addOnCompleteListener(task -> {
-            if (task.isSuccessful()) {
-                Toast.makeText(getContext(), "Pedido criado com sucesso!", Toast.LENGTH_LONG).show();
-                if (getActivity() instanceof OngActivity) {
-                    ((OngActivity) getActivity()).navigateToOrders();
-                }
-            } else {
-                // THE FIX: Display the actual Firebase error message.
-                String errorMessage = task.getException() != null ? task.getException().getMessage() : "Erro desconhecido.";
-                Toast.makeText(getContext(), "Falha ao criar o pedido: " + errorMessage, Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        if (getActivity() instanceof OngActivity) {
-            ((OngActivity) getActivity()).setToolbarTitle("Carrinho", OngActivity.TitleAlignment.CENTER);
+            attachListeners();
         }
     }
 
-    private void loadProductCatalog() {
-        DatabaseReference catalogRef = ConfigurationFirebase.getFirebaseDatabase().child("establishment_product_catalog");
-        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
+    private void attachListeners() {
+        // Attach persistent listeners to all data sources.
+        catalogListener = dbRef.child("establishment_product_catalog").addValueEventListener(createCatalogListener());
+        stockListener = dbRef.child("stock_items").addValueEventListener(createStockListener());
+        cartListener = dbRef.child("shopping_carts").child(currentOngId).addValueEventListener(createCartListener());
+    }
+
+    private ValueEventListener createCatalogListener() {
+        return new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 productCatalogMap.clear();
@@ -153,110 +111,213 @@ public class OngCartFragment extends Fragment {
                     Product product = ds.getValue(Product.class);
                     if (product != null) {
                         product.setProductId(ds.getKey());
-                        productCatalogMap.put(ds.getKey(), product);
+                        productCatalogMap.put(product.getProductId(), product);
                     }
                 }
-                listenForCartItems();
+                combineDataAndRefreshUI();
             }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) Toast.makeText(getContext(), "Falha ao carregar catálogo.", Toast.LENGTH_SHORT).show();
-            }
-        });
+            @Override public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar catálogo."); }
+        };
     }
 
-    private void listenForCartItems() {
-        cartListener = cartRef.addValueEventListener(new ValueEventListener() {
+    private ValueEventListener createStockListener() {
+        return new ValueEventListener() {
             @Override
-            public void onDataChange(@NonNull DataSnapshot cartSnapshot) {
-                currentCartItems.clear();
-                if (!cartSnapshot.exists()) {
-                    adapter.setData(new ArrayList<>());
-                    fabConfirmOrder.setVisibility(View.GONE);
-                    return;
-                }
-
-                DatabaseReference stockRef = ConfigurationFirebase.getFirebaseDatabase().child("stock_items");
-                stockRef.addListenerForSingleValueEvent(new ValueEventListener() {
-                    @Override
-                    public void onDataChange(@NonNull DataSnapshot stockSnapshot) {
-                        List<ItemDisplay> validItems = new ArrayList<>();
-                        List<String> itemsToRemove = new ArrayList<>();
-
-                        for (DataSnapshot cartItemDs : cartSnapshot.getChildren()) {
-                            ItemDisplay cartItem = cartItemDs.getValue(ItemDisplay.class);
-                            if (cartItem == null || cartItem.getEstablishmentId() == null || cartItem.getStockItemId() == null) {
-                                if (cartItem != null && cartItem.getStockItemId() != null) itemsToRemove.add(cartItem.getStockItemId());
-                                continue;
-                            }
-
-                            if (stockSnapshot.child(cartItem.getEstablishmentId()).hasChild(cartItem.getStockItemId())) {
-                                Product productDetails = productCatalogMap.get(cartItem.getProductId());
-                                if (productDetails != null) {
-                                    cartItem.setProductUnitType(productDetails.getProductUnitType());
-                                }
-                                validItems.add(cartItem);
-                            } else {
-                                itemsToRemove.add(cartItem.getStockItemId());
-                            }
-                        }
-
-                        processValidationResults(validItems, itemsToRemove);
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                allStockItemsMap.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    StockItem item = ds.getValue(StockItem.class);
+                    if (item != null) {
+                        allStockItemsMap.put(ds.getKey(), item);
                     }
-
-                    @Override
-                    public void onCancelled(@NonNull DatabaseError error) {
-                        Toast.makeText(getContext(), "Erro ao validar estoque.", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) {
-                    Toast.makeText(getContext(), "Falha ao carregar o carrinho.", Toast.LENGTH_SHORT).show();
                 }
+                combineDataAndRefreshUI();
             }
-        });
+            @Override public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar estoque."); }
+        };
     }
 
-    private void processValidationResults(List<ItemDisplay> validItems, List<String> itemIdsToRemove) {
-        currentCartItems.clear();
-        currentCartItems.addAll(validItems);
+    private ValueEventListener createCartListener() {
+        return new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                cartPointers.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    cartPointers.add(ds.getValue(OrderItem.class));
+                }
+                combineDataAndRefreshUI();
+            }
+            @Override public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar carrinho."); }
+        };
+    }
 
-        if (currentCartItems.isEmpty()) {
-            fabConfirmOrder.setVisibility(View.GONE);
-        } else {
-            fabConfirmOrder.setVisibility(View.VISIBLE);
+    private void combineDataAndRefreshUI() {
+        if (!isAdded() || productCatalogMap.isEmpty() || allStockItemsMap.isEmpty()) {
+            return; // Wait for all data sources to be loaded at least once.
         }
 
-        Map<String, GroupedProduct> groupedMap = new HashMap<>();
-        for (ItemDisplay item : validItems) {
-            if (item.getProductName() != null) {
-                GroupedProduct group = groupedMap.computeIfAbsent(item.getProductName(),
-                        k -> new GroupedProduct(item.getProductName(), new ArrayList<>()));
-                group.getItems().add(item);
+        List<CartDisplayItem> displayItems = new ArrayList<>();
+        List<String> itemsToRemoveFromCart = new ArrayList<>();
+
+        for (OrderItem pointer : cartPointers) {
+            if(pointer == null || pointer.getStockItemId() == null) continue;
+
+            StockItem stockItem = allStockItemsMap.get(pointer.getStockItemId());
+
+            if (stockItem != null) {
+                Product productDetails = productCatalogMap.get(stockItem.getProductId());
+                if ("Disponível".equals(stockItem.getStockItemStatus()) && stockItem.getStockItemQuantity() >= pointer.getOrderItemQuantity()) {
+                    displayItems.add(new CartDisplayItem(stockItem, pointer, productDetails));
+                } else {
+                    itemsToRemoveFromCart.add(pointer.getStockItemId());
+                }
+            } else {
+                itemsToRemoveFromCart.add(pointer.getStockItemId());
             }
         }
 
-        List<GroupedProduct> groupedList = new ArrayList<>(groupedMap.values());
+        updateAdapter(displayItems);
+
+        if (!itemsToRemoveFromCart.isEmpty()) {
+            DatabaseReference cartRef = dbRef.child("shopping_carts").child(currentOngId);
+            Map<String, Object> updates = new HashMap<>();
+            for (String itemIdToRemove : itemsToRemoveFromCart) {
+                updates.put(itemIdToRemove, null);
+            }
+            cartRef.updateChildren(updates);
+            showToast("Alguns itens não estão mais disponíveis e foram removidos.");
+        }
+    }
+
+    private void updateAdapter(List<CartDisplayItem> items) {
+        fabConfirmOrder.setVisibility(!items.isEmpty() ? View.VISIBLE : View.GONE);
+        Map<String, GroupedProduct<CartDisplayItem>> groupedMap = new HashMap<>();
+        for (CartDisplayItem item : items) {
+            GroupedProduct<CartDisplayItem> group = groupedMap.computeIfAbsent(item.getProductName(), k -> new GroupedProduct<>(item.getProductName(), new ArrayList<>()));
+            group.getItems().add(item);
+        }
+        List<GroupedProduct<CartDisplayItem>> groupedList = new ArrayList<>(groupedMap.values());
         Collections.sort(groupedList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
-
         adapter.setData(groupedList);
-
-        if (!itemIdsToRemove.isEmpty() && currentOngId != null) {
-            for (String itemIdToRemove : itemIdsToRemove) {
-                cartRef.child(itemIdToRemove).removeValue();
-            }
-        }
     }
+    
+    // ... (Transaction logic remains the same) ...
 
     @Override
     public void onStop() {
         super.onStop();
-        if (cartListener != null && cartRef != null) {
-            cartRef.removeEventListener(cartListener);
+        // Detach all listeners to prevent memory leaks.
+        if (cartListener != null) dbRef.child("shopping_carts").child(currentOngId).removeEventListener(cartListener);
+        if (catalogListener != null) dbRef.child("establishment_product_catalog").removeEventListener(catalogListener);
+        if (stockListener != null) dbRef.child("stock_items").removeEventListener(stockListener);
+    }
+    
+    private void showToast(String message) {
+        if (getContext() != null) {
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void initializeComponents(View view) {
+        recyclerCart = view.findViewById(R.id.recycler_cart_items);
+        fabConfirmOrder = view.findViewById(R.id.fab_confirm_order);
+        recyclerCart.setLayoutManager(new LinearLayoutManager(getContext()));
+        adapter = new OngCartAdapter(getContext(), new ArrayList<>());
+        recyclerCart.setAdapter(adapter);
+    }
+
+    private void showConfirmOrderDialog() {
+        new AlertDialog.Builder(requireContext())
+                .setTitle("Confirmar Pedido")
+                .setMessage("Os itens do pedido serão deduzidos do estoque. Deseja confirmar?")
+                .setPositiveButton("Confirmar", (dialog, which) -> runStockDeductionTransactions())
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void runStockDeductionTransactions() {
+        final int totalItemsToProcess = cartPointers.size();
+        if (totalItemsToProcess == 0) return;
+
+        final AtomicInteger successCounter = new AtomicInteger(0);
+        final List<String> failedItemIds = new ArrayList<>();
+
+        for (OrderItem pointer : cartPointers) {
+            DatabaseReference stockItemRef = dbRef.child("stock_items").child(pointer.getStockItemId());
+
+            stockItemRef.runTransaction(new Transaction.Handler() {
+                @NonNull
+                @Override
+                public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
+                    StockItem stockItem = mutableData.getValue(StockItem.class);
+                    if (stockItem == null || !"Disponível".equals(stockItem.getStockItemStatus())) {
+                        return Transaction.abort();
+                    }
+                    double currentQuantity = stockItem.getStockItemQuantity();
+                    double requestedQuantity = pointer.getOrderItemQuantity();
+
+                    if (currentQuantity < requestedQuantity) {
+                        return Transaction.abort();
+                    }
+                    stockItem.setStockItemQuantity(currentQuantity - requestedQuantity);
+                    mutableData.setValue(stockItem);
+                    return Transaction.success(mutableData);
+                }
+
+                @Override
+                public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot dataSnapshot) {
+                    if (!committed) {
+                        failedItemIds.add(pointer.getStockItemId());
+                    }
+                    if (successCounter.incrementAndGet() == totalItemsToProcess) {
+                        onAllTransactionsComplete(failedItemIds);
+                    }
+                }
+            });
+        }
+    }
+
+    private void onAllTransactionsComplete(List<String> failedItemIds) {
+        if (!failedItemIds.isEmpty()) {
+            DatabaseReference cartRef = dbRef.child("shopping_carts").child(currentOngId);
+            for(String failedId : failedItemIds) {
+                cartRef.child(failedId).removeValue();
+            }
+            showToast("Alguns itens não estão mais disponíveis e foram removidos do seu carrinho.");
+        } else {
+            createOrderAndClearCart();
+        }
+    }
+
+    private void createOrderAndClearCart() {
+        String orderId = dbRef.child("orders").child(currentOngId).push().getKey();
+        if (orderId == null) { return; }
+
+        Order newOrder = new Order();
+        newOrder.setOrderId(orderId);
+        newOrder.setOngId(currentOngId);
+        newOrder.setOrderStatus("Realize o agendamento");
+        newOrder.setOrderCreatedAt(System.currentTimeMillis());
+
+        Map<String, OrderItem> itemsForOrder = new HashMap<>();
+        for (OrderItem item : cartPointers) {
+            itemsForOrder.put(item.getStockItemId(), item);
+        }
+        newOrder.setOrderItems(itemsForOrder);
+
+        Map<String, Object> childUpdates = new HashMap<>();
+        childUpdates.put("/orders/" + currentOngId + "/" + orderId, newOrder);
+        childUpdates.put("/shopping_carts/" + currentOngId, null);
+
+        dbRef.updateChildren(childUpdates).addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                showToast("Pedido criado com sucesso!");
+                if (getActivity() instanceof OngActivity) {
+                    ((OngActivity) getActivity()).navigateToOrders();
+                }
+            } else {
+                showToast("Falha ao salvar o pedido.");
+            }
+        });
     }
 }

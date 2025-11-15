@@ -1,9 +1,6 @@
 package adapter;
 
 import android.content.Context;
-import android.content.DialogInterface;
-import android.graphics.Color;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,32 +8,42 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
-import androidx.appcompat.app.AlertDialog;
-import androidx.core.content.ContextCompat;
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.company.doafacil.R;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.Query;
 import com.google.firebase.database.ValueEventListener;
 
 import java.text.DecimalFormat;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import fragment.AdminApprovalsFragment.AdminApprovalItem;
 import helper.ConfigurationFirebase;
-import model.ItemDisplay;
+import model.ReceivedDonationItem;
+import model.StockItem;
 
-// REBUILD: Restoring adapter to its original state.
+// RE-DESIGN: Correctly mapping all data to the new layout fields.
 public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdapter.MyViewHolder> {
 
-    private List<ItemDisplay> items;
+    private List<AdminApprovalItem> items;
     private Context context;
 
-    public AdminApprovalAdapter(List<ItemDisplay> items, Context context) {
+    public AdminApprovalAdapter(List<AdminApprovalItem> items, Context context) {
         this.items = items;
         this.context = context;
+    }
+
+    public void setData(List<AdminApprovalItem> items) {
+        this.items = items;
+        notifyDataSetChanged();
     }
 
     @NonNull
@@ -48,113 +55,118 @@ public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdap
 
     @Override
     public void onBindViewHolder(@NonNull MyViewHolder holder, int position) {
-        ItemDisplay item = items.get(position);
+        AdminApprovalItem displayItem = items.get(position);
+        String status = displayItem.effectiveStatus;
 
-        // --- Bind common data ---
-        holder.productName.setText(item.getProductName());
-        holder.establishmentName.setText("- " + item.getEstablishmentName());
-        
-        if (item.getEstablishmentAddress() != null && !item.getEstablishmentAddress().isEmpty()) {
-            holder.establishmentAddress.setText(item.getEstablishmentAddress());
-            holder.establishmentAddress.setVisibility(View.VISIBLE);
+        // THE FIX: Correctly map all data to the new layout.
+        holder.establishmentName.setText("- " + displayItem.establishmentName);
+        holder.establishmentAddress.setText(displayItem.establishmentAddress);
+        holder.collectionDate.setText("Data para coleta: " + displayItem.donation.getReceivedScheduledDateTime());
+
+        Map<String, ReceivedDonationItem> receivedItems = displayItem.donation.getReceivedItems();
+        if (receivedItems != null && !receivedItems.isEmpty()) {
+            ReceivedDonationItem firstItem = receivedItems.values().iterator().next();
+            holder.productName.setText(firstItem.getProductName());
+            DecimalFormat formatter = new DecimalFormat("0.##");
+            String quantityText = "Qtd: " + formatter.format(firstItem.getReceivedQuantity()) + " " + firstItem.getProductUnitType();
+            holder.quantity.setText(quantityText);
+            holder.expiration.setText("Data de validade: " + firstItem.getReceivedExpirationDate());
         } else {
-            holder.establishmentAddress.setVisibility(View.GONE);
+            holder.productName.setText("Doação sem itens");
+            holder.quantity.setText("");
+            holder.expiration.setText("");
         }
 
-        DecimalFormat formatter = new DecimalFormat("0.##");
-        String formattedQuantity = formatter.format(item.getStockItemQuantity());
-        String unitType = item.getProductUnitType() != null ? item.getProductUnitType() : "";
-        holder.quantity.setText("Quantidade: " + formattedQuantity + " " + unitType.trim());
-
-        holder.expiration.setText("Validade: " + item.getStockItemExpirationDate());
-        
-        // --- State Machine Logic ---
         holder.pendingActionsLayout.setVisibility(View.GONE);
         holder.collectedStateLayout.setVisibility(View.GONE);
         holder.finalStatusText.setVisibility(View.GONE);
 
-        switch (item.getStockItemStatus()) {
+        switch (status) {
             case "Aguarde a coleta":
                 holder.pendingActionsLayout.setVisibility(View.VISIBLE);
-                holder.approveButton.setOnClickListener(v -> updateDonationStatus(item, "Doação Coletada"));
-                holder.cancelButton.setOnClickListener(v -> updateDonationStatus(item, "Doação Cancelada"));
+                holder.approveButton.setText("Aprovar"); // Changed from "Confirmar Coleta" to "Aprovar"
+                holder.approveButton.setOnClickListener(v -> confirmCollection(displayItem));
+                holder.cancelButton.setOnClickListener(v -> cancelDonation(displayItem));
                 break;
-
-            case "Doação Coletada":
+            case "Doação coletada":
                 holder.collectedStateLayout.setVisibility(View.VISIBLE);
+                holder.collectedStatusText.setText("Status: Doação coletada");
                 holder.collectedStatusText.setTextColor(ContextCompat.getColor(context, R.color.watergreen));
-                holder.removeFromStockButton.setOnClickListener(v -> showRemoveFromStockConfirmation(item));
+                holder.removeFromStockButton.setOnClickListener(v -> removeItemsFromStock(displayItem));
                 break;
-
-            case "Doação Cancelada":
-                holder.finalStatusText.setVisibility(View.VISIBLE);
-                holder.finalStatusText.setText("Doação Cancelada");
-                holder.finalStatusText.setTextColor(ContextCompat.getColor(context, R.color.status_red));
-                break;
-
-            case "Produto retirado do estoque":
-                holder.finalStatusText.setVisibility(View.VISIBLE);
-                holder.finalStatusText.setText("Produto retirado do estoque");
-                holder.finalStatusText.setTextColor(Color.GRAY);
-                break;
-
+            case "Removido do estoque":
+            case "Doação cancelada":
             default:
-                // Catch-all for any other status
                 holder.finalStatusText.setVisibility(View.VISIBLE);
-                holder.finalStatusText.setText(item.getStockItemStatus());
-                holder.finalStatusText.setTextColor(Color.GRAY);
+                holder.finalStatusText.setText("Status: " + status);
+                holder.finalStatusText.setTextColor(ContextCompat.getColor(context, R.color.status_red));
                 break;
         }
     }
-    
-    private void showRemoveFromStockConfirmation(ItemDisplay item) {
-        new AlertDialog.Builder(context)
-            .setTitle("Retirar do Estoque")
-            .setMessage("Tem certeza que deseja retirar o produto do estoque?")
-            .setPositiveButton("Confirmar", (dialog, which) -> {
-                updateDonationStatus(item, "Produto retirado do estoque");
-            })
-            .setNegativeButton("Cancelar", null)
-            .show();
+
+    private void confirmCollection(AdminApprovalItem displayItem) {
+        DatabaseReference rootRef = FirebaseDatabase.getInstance().getReference();
+        Map<String, Object> childUpdates = new HashMap<>();
+
+        childUpdates.put("/received_donations/" + displayItem.donation.getDonationId() + "/receivedStatus", "Doação coletada");
+
+        for (Map.Entry<String, ReceivedDonationItem> entry : displayItem.donation.getReceivedItems().entrySet()) {
+            ReceivedDonationItem promisedItem = entry.getValue();
+            String newStockItemId = rootRef.child("stock_items").push().getKey();
+
+            StockItem newStockItem = new StockItem();
+            newStockItem.setStockItemId(newStockItemId);
+            newStockItem.setDonationId(displayItem.donation.getDonationId());
+            newStockItem.setProductId(promisedItem.getProductId());
+            newStockItem.setStockItemQuantity(promisedItem.getReceivedQuantity());
+            newStockItem.setStockItemExpirationDate(promisedItem.getReceivedExpirationDate());
+            newStockItem.setStockItemStatus("Disponível");
+            newStockItem.setStockItemCreatedAt(System.currentTimeMillis());
+
+            childUpdates.put("/stock_items/" + newStockItemId, newStockItem);
+        }
+
+        rootRef.updateChildren(childUpdates).addOnCompleteListener(task -> {
+            if (!task.isSuccessful()) Toast.makeText(context, "Falha ao confirmar coleta.", Toast.LENGTH_SHORT).show();
+        });
     }
 
-    private void updateDonationStatus(ItemDisplay item, String newStatus) {
-        getDatabaseReference(item).child("stockItemStatus").setValue(newStatus)
-            .addOnSuccessListener(aVoid -> {
-                Toast.makeText(context, "Status atualizado!", Toast.LENGTH_SHORT).show();
-                // If the product is now retired, remove it from all carts
-                if ("Produto retirado do estoque".equals(newStatus)) {
-                    removeOrphanedCartItems(item.getStockItemId());
-                }
-            })
-            .addOnFailureListener(e -> Toast.makeText(context, "Falha ao atualizar status: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+    private void cancelDonation(AdminApprovalItem displayItem) {
+        DatabaseReference donationRef = ConfigurationFirebase.getFirebaseDatabase()
+                .child("received_donations").child(displayItem.donation.getDonationId());
+        donationRef.child("receivedStatus").setValue("Doação cancelada");
     }
 
-    private void removeOrphanedCartItems(String removedStockItemId) {
-        if (removedStockItemId == null) return;
-        DatabaseReference cartsRef = ConfigurationFirebase.getFirebaseDatabase().child("shopping_carts");
-        cartsRef.addListenerForSingleValueEvent(new ValueEventListener() {
+    private void removeItemsFromStock(AdminApprovalItem displayItem) {
+        DatabaseReference stockItemsRef = ConfigurationFirebase.getFirebaseDatabase().child("stock_items");
+        Query query = stockItemsRef.orderByChild("donationId").equalTo(displayItem.donation.getDonationId());
+
+        query.addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                for (DataSnapshot ongCartSnapshot : dataSnapshot.getChildren()) {
-                    if (ongCartSnapshot.hasChild(removedStockItemId)) {
-                         ongCartSnapshot.child(removedStockItemId).getRef().removeValue();
-                    }
+                if (!dataSnapshot.exists()) {
+                    Toast.makeText(context, "Erro: Itens de estoque já foram removidos ou não existem.", Toast.LENGTH_LONG).show();
+                    return;
                 }
+                Map<String, Object> stockUpdates = new HashMap<>();
+                for (DataSnapshot stockItemSnapshot : dataSnapshot.getChildren()) {
+                    stockUpdates.put(stockItemSnapshot.getKey() + "/stockItemStatus", "Removido do estoque");
+                }
+
+                stockItemsRef.updateChildren(stockUpdates).addOnCompleteListener(task -> {
+                    if (task.isSuccessful()) {
+                        Toast.makeText(context, "Itens removidos do estoque.", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(context, "Falha ao remover itens do estoque.", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
 
             @Override
             public void onCancelled(@NonNull DatabaseError databaseError) {
-                Log.e("AdminApprovalAdapter", "Error cleaning carts: " + databaseError.getMessage());
+                Toast.makeText(context, "Erro ao buscar itens de estoque: " + databaseError.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
-    }
-
-    private DatabaseReference getDatabaseReference(ItemDisplay item) {
-        return ConfigurationFirebase.getFirebaseDatabase()
-                .child("stock_items")
-                .child(item.getEstablishmentId())
-                .child(item.getStockItemId());
     }
 
     @Override
@@ -163,7 +175,7 @@ public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdap
     }
 
     public class MyViewHolder extends RecyclerView.ViewHolder {
-        TextView productName, establishmentName, establishmentAddress, quantity, expiration, collectedStatusText, finalStatusText;
+        TextView productName, establishmentName, establishmentAddress, quantity, expiration, collectionDate, collectedStatusText, finalStatusText;
         Button approveButton, cancelButton, removeFromStockButton;
         LinearLayout pendingActionsLayout, collectedStateLayout;
 
@@ -174,13 +186,12 @@ public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdap
             establishmentAddress = itemView.findViewById(R.id.text_approval_establishment_address);
             quantity = itemView.findViewById(R.id.text_approval_quantity);
             expiration = itemView.findViewById(R.id.text_approval_expiration);
+            collectionDate = itemView.findViewById(R.id.text_approval_collection_date);
             
-            // State Layouts
             pendingActionsLayout = itemView.findViewById(R.id.layout_pending_actions);
             collectedStateLayout = itemView.findViewById(R.id.layout_collected_state);
             finalStatusText = itemView.findViewById(R.id.text_final_status);
 
-            // Buttons and Texts inside states
             approveButton = itemView.findViewById(R.id.button_approve);
             cancelButton = itemView.findViewById(R.id.button_cancel);
             collectedStatusText = itemView.findViewById(R.id.text_collected_status);

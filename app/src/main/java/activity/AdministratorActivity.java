@@ -18,7 +18,7 @@ import fragment.AdminDonationsFragment;
 import fragment.AdminProfileFragment;
 import helper.ConfigurationFirebase;
 
-// RE-ARCH: Implementing the flexible, decoupled toolbar control abstraction.
+// RE-ARCH: Implementing the final navigation callback.
 public class AdministratorActivity extends AppCompatActivity {
 
     private FirebaseAuth authentication;
@@ -53,6 +53,12 @@ public class AdministratorActivity extends AppCompatActivity {
         if (savedInstanceState == null) {
             bottomNav.setSelectedItemId(R.id.nav_admin_approvals);
         }
+    }
+
+    // THE FIX: Public method to be called by fragments.
+    public void navigateToHome() {
+        BottomNavigationView bottomNav = findViewById(R.id.admin_bottom_navigation);
+        bottomNav.setSelectedItemId(R.id.nav_admin_profile);
     }
 
     public void setToolbarTitle(String title, TitleAlignment alignment) {

@@ -1,26 +1,15 @@
 package model;
 
-import com.google.firebase.database.DatabaseReference;
-
-import helper.ConfigurationFirebase;
-
-// ARCHITECTURE: Aligning Product with the user's superior data model.
-public class Product {
+// ARCHITECTURE: Implementing the user's superior data model.
+public class OrderItem {
 
     private String productId;
     private String productName;
     private String productUnitType;
+    private double orderItemQuantity;
+    private String stockItemId; // Optional: specific stock item to fulfill from
 
-    public Product() {
-    }
-
-    public void save() {
-        DatabaseReference firebaseRef = ConfigurationFirebase.getFirebaseDatabase();
-        // THE FIX: Point to a global product catalog, not a per-establishment one.
-        DatabaseReference productRef = firebaseRef
-                .child("product_catalog") 
-                .child(this.getProductId());
-        productRef.setValue(this);
+    public OrderItem() {
     }
 
     // --- Getters and Setters ---
@@ -47,5 +36,21 @@ public class Product {
 
     public void setProductUnitType(String productUnitType) {
         this.productUnitType = productUnitType;
+    }
+
+    public double getOrderItemQuantity() {
+        return orderItemQuantity;
+    }
+
+    public void setOrderItemQuantity(double orderItemQuantity) {
+        this.orderItemQuantity = orderItemQuantity;
+    }
+
+    public String getStockItemId() {
+        return stockItemId;
+    }
+
+    public void setStockItemId(String stockItemId) {
+        this.stockItemId = stockItemId;
     }
 }

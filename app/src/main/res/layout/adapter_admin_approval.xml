@@ -61,9 +61,17 @@
             android:textSize="14sp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/text_approval_quantity"
-            tools:text="Validade: 20/12/2024" />
+            tools:text="Data de validade: 20/12/2024" />
 
-        <!-- PENDING STATE ACTIONS (Uniform, no kludge) -->
+        <TextView
+            android:id="@+id/text_approval_collection_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/text_approval_expiration"
+            tools:text="Data para coleta: 25/12/2024 14:00" />
+
         <LinearLayout
             android:id="@+id/layout_pending_actions"
             android:layout_width="0dp"
@@ -72,7 +80,7 @@
             android:layout_marginTop="16dp"
             android:gravity="center"
             android:visibility="gone"
-            app:layout_constraintTop_toBottomOf="@id/text_approval_expiration"
+            app:layout_constraintTop_toBottomOf="@id/text_approval_collection_date"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
@@ -97,7 +105,6 @@
                 app:backgroundTint="@color/watergreen"/>
         </LinearLayout>
 
-        <!-- COLLECTED STATE ACTIONS (Uniform, no kludge) -->
         <LinearLayout
             android:id="@+id/layout_collected_state"
             android:layout_width="0dp"
@@ -109,7 +116,7 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/text_approval_expiration"
+            app:layout_constraintTop_toBottomOf="@id/text_approval_collection_date"
             tools:visibility="gone">
 
             <TextView
@@ -133,7 +140,6 @@
 
         </LinearLayout>
         
-        <!-- FINAL STATUS (Cancelled or Retired) -->
         <TextView
             android:id="@+id/text_final_status"
             android:layout_width="0dp"
@@ -146,7 +152,7 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/text_approval_expiration"
+            app:layout_constraintTop_toBottomOf="@id/text_approval_collection_date"
             tools:text="Doação Cancelada"
             tools:visibility="gone"/>
 

@@ -11,22 +11,27 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.company.doafacil.R;
 import com.google.android.material.imageview.ShapeableImageView;
+import com.google.firebase.database.DatabaseReference;
 
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import model.GroupedProduct;
-import model.ItemDisplay;
 
-// RE-FIX: Correcting the renamed view ID to prevent the crash.
+import fragment.OngCartFragment.CartDisplayItem;
+import helper.ConfigurationFirebase;
+import helper.UserFirebase;
+import model.GroupedProduct;
+import model.OrderItem;
+
+// RE-ARCH: Removing the faulty expandable logic that caused the compile error.
 public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHolder> {
 
-    private List<GroupedProduct> productList;
+    private List<GroupedProduct<CartDisplayItem>> productList;
     private final Context context;
     private final List<Integer> placeholderImages;
 
-    public OngCartAdapter(Context context, List<GroupedProduct> productList) {
+    public OngCartAdapter(Context context, List<GroupedProduct<CartDisplayItem>> productList) {
         this.context = context;
         this.productList = productList != null ? productList : new ArrayList<>();
         this.placeholderImages = Arrays.asList(
@@ -34,9 +39,15 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
                 R.drawable.food_placeholder2,
                 R.drawable.food_placeholder3
         );
+        setHasStableIds(true);
+    }
+    
+    @Override
+    public long getItemId(int position) {
+        return productList.get(position).getProductName().hashCode();
     }
 
-    public void setData(List<GroupedProduct> productList) {
+    public void setData(List<GroupedProduct<CartDisplayItem>> productList) {
         this.productList = productList;
         notifyDataSetChanged();
     }
@@ -50,33 +61,47 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
 
     @Override
     public void onBindViewHolder(@NonNull MyViewHolder holder, int position) {
-        GroupedProduct group = productList.get(position);
+        GroupedProduct<CartDisplayItem> group = productList.get(position);
 
         holder.productName.setText(group.getProductName());
 
         double totalQuantityInCart = 0;
         String unitType = "";
         if (group.getItems() != null && !group.getItems().isEmpty()) {
-            unitType = group.getItems().get(0).getProductUnitType();
+            CartDisplayItem firstItem = group.getItems().get(0);
+            if (firstItem.productDetails != null) {
+                unitType = firstItem.productDetails.getProductUnitType();
+            }
             if (unitType == null) unitType = "";
-            for (ItemDisplay item : group.getItems()) {
-                totalQuantityInCart += item.getStockItemQuantity();
+            for (CartDisplayItem item : group.getItems()) {
+                totalQuantityInCart += item.orderItem.getOrderItemQuantity();
             }
         }
         DecimalFormat formatter = new DecimalFormat("0.##");
-        String summaryText = "Você tem " + formatter.format(totalQuantityInCart) + " " + unitType.trim() + " no carrinho";
-        
-        // THE FIX: Use the correct TextView variable.
+        String summaryText = "Você pediu " + formatter.format(totalQuantityInCart) + " " + unitType.trim();
         holder.productSummary.setText(summaryText);
 
         int imageIndex = Math.abs(group.getProductName().hashCode()) % placeholderImages.size();
-        int deterministicImageId = placeholderImages.get(imageIndex);
-        holder.productImage.setImageDrawable(ContextCompat.getDrawable(context, deterministicImageId));
+        holder.productImage.setImageDrawable(ContextCompat.getDrawable(context, placeholderImages.get(imageIndex)));
 
+        // The nested RecyclerView is now always visible, as per the layout file.
+        OngCartItemAdapter itemAdapter = new OngCartItemAdapter(context, group.getItems(), this::removeItemFromCart);
         holder.itemsRecyclerView.setLayoutManager(new LinearLayoutManager(context));
-        OngCartItemAdapter itemAdapter = new OngCartItemAdapter(context, group.getItems());
         holder.itemsRecyclerView.setAdapter(itemAdapter);
         holder.itemsRecyclerView.setNestedScrollingEnabled(false);
+    }
+    
+    private void removeItemFromCart(OrderItem orderItem) {
+        String ongId = UserFirebase.getIdUser();
+        if (ongId == null) return;
+        
+        DatabaseReference cartItemRef = ConfigurationFirebase.getFirebaseDatabase()
+                .child("shopping_carts")
+                .child(ongId)
+                .child(orderItem.getStockItemId());
+        
+        cartItemRef.removeValue();
+        // The fragment's listener will handle the UI update.
     }
 
     @Override
@@ -85,7 +110,6 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
     }
 
     public static class MyViewHolder extends RecyclerView.ViewHolder {
-        // THE FIX: Rename variable to match its purpose.
         TextView productName, productSummary;
         ShapeableImageView productImage;
         RecyclerView itemsRecyclerView;
@@ -93,7 +117,6 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
         public MyViewHolder(@NonNull View itemView) {
             super(itemView);
             productName = itemView.findViewById(R.id.product_name);
-            // THE FIX: Use the new, correct ID from the layout file.
             productSummary = itemView.findViewById(R.id.product_summary);
             productImage = itemView.findViewById(R.id.product_image);
             itemsRecyclerView = itemView.findViewById(R.id.recycler_cart_items_nested);

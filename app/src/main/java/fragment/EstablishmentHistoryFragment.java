@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -19,32 +20,25 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.ValueEventListener;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 import activity.EstablishmentActivity;
 import adapter.EstablishmentProductAdapter;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
-import model.Product;
-import model.StockItem;
-import model.ItemDisplay;
+import model.ReceivedDonation;
 
-// RE-ARCH: Refactoring to use the new decoupled toolbar control from EstablishmentActivity.
+// REBUILD: Final fix for the Doador flow - using the unified adapter constructor and setData method.
 public class EstablishmentHistoryFragment extends Fragment {
 
     private RecyclerView recyclerHistory;
     private EstablishmentProductAdapter adapter;
-    private List<ItemDisplay> historyItemsDisplayList = new ArrayList<>();
-    private Map<String, Product> productCatalog = new HashMap<>();
-    private DatabaseReference databaseRef;
+    private List<ReceivedDonation> historyList = new ArrayList<>();
+    private DatabaseReference donationsRef;
     private ValueEventListener historyListener;
-    private DatabaseReference stockItemsRef;
     private String idCurrentUser;
-
-    public EstablishmentHistoryFragment() {
-    }
+    private TextView textNoHistory;
 
     @Nullable
     @Override
@@ -57,100 +51,73 @@ public class EstablishmentHistoryFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
 
         recyclerHistory = view.findViewById(R.id.recycler_establishment_history);
-        databaseRef = ConfigurationFirebase.getFirebaseDatabase();
+        textNoHistory = view.findViewById(R.id.text_no_history);
         idCurrentUser = UserFirebase.getIdUser();
+        donationsRef = ConfigurationFirebase.getFirebaseDatabase().child("received_donations");
 
         recyclerHistory.setLayoutManager(new LinearLayoutManager(getContext()));
         recyclerHistory.setHasFixedSize(true);
-        adapter = new EstablishmentProductAdapter(historyItemsDisplayList, getContext(), "historico");
+        
+        // THE FIX #1: Use the correct constructor that only takes the Context.
+        adapter = new EstablishmentProductAdapter(getContext());
         recyclerHistory.setAdapter(adapter);
     }
 
     @Override
     public void onResume() {
         super.onResume();
-        // THE FIX: Set the toolbar title using the new decoupled method.
         if (getActivity() instanceof EstablishmentActivity) {
             ((EstablishmentActivity) getActivity()).setToolbarTitle("Histórico de Doações", EstablishmentActivity.TitleAlignment.CENTER);
         }
+        listenForHistory();
     }
 
-    @Override
-    public void onStart() {
-        super.onStart();
-        loadLocalCatalogAndThenListenForHistory();
-    }
+    private void listenForHistory() {
+        if (historyListener != null) {
+            donationsRef.removeEventListener(historyListener);
+        }
 
-    private void loadLocalCatalogAndThenListenForHistory() {
-        DatabaseReference catalogRef = databaseRef.child("establishment_product_catalog");
-        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                productCatalog.clear();
-                for (DataSnapshot ds : dataSnapshot.getChildren()) {
-                    Product product = ds.getValue(Product.class);
-                    if (product != null) {
-                        String productId = ds.getKey();
-                        product.setProductId(productId);
-                        productCatalog.put(productId, product);
-                    }
-                }
-                listenForHistoryItems();
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError databaseError) {
-                if(getContext() != null)
-                    Toast.makeText(getContext(), "Falha ao carregar o catálogo de produtos.", Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
-    private void listenForHistoryItems() {
-        stockItemsRef = databaseRef.child("stock_items").child(idCurrentUser);
-        if (historyListener == null) {
-            historyListener = new ValueEventListener() {
-                @Override
-                public void onDataChange(@NonNull DataSnapshot snapshot) {
-                    historyItemsDisplayList.clear();
-                    for (DataSnapshot ds : snapshot.getChildren()) {
-                        StockItem stockItem = ds.getValue(StockItem.class);
-                        if (stockItem != null && !"Pendente de Aprovação".equals(stockItem.getStockItemStatus())) {
-                            Product productDetails = productCatalog.get(stockItem.getProductId());
-                            if (productDetails != null) {
-                                ItemDisplay displayItem = new ItemDisplay();
-                                displayItem.setStockItemId(ds.getKey());
-                                displayItem.setEstablishmentId(stockItem.getEstablishmentId());
-                                displayItem.setProductName(productDetails.getProductName());
-                                displayItem.setProductUnitType(productDetails.getProductUnitType());
-                                displayItem.setStockItemQuantity(stockItem.getStockItemQuantity());
-                                displayItem.setStockItemExpirationDate(stockItem.getStockItemExpirationDate());
-                                displayItem.setStockItemStatus(stockItem.getStockItemStatus());
-                                displayItem.setStockItemPickupDate(stockItem.getStockItemPickupDate());
-                                displayItem.setStockItemPickupTime(stockItem.getStockItemPickupTime());
-                                historyItemsDisplayList.add(displayItem);
+        historyListener = donationsRef.orderByChild("establishmentId").equalTo(idCurrentUser)
+                .addValueEventListener(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot snapshot) {
+                        historyList.clear();
+                        for (DataSnapshot ds : snapshot.getChildren()) {
+                            ReceivedDonation donation = ds.getValue(ReceivedDonation.class);
+                            if (donation != null) {
+                                historyList.add(donation);
                             }
                         }
+                        Collections.reverse(historyList); // Show newest first
+                        // THE FIX #2: Use the setData method to update the adapter's data.
+                        adapter.setData(historyList);
+                        updateViewVisibility();
                     }
-                    adapter.notifyDataSetChanged();
-                }
 
-                @Override
-                public void onCancelled(@NonNull DatabaseError error) {
-                    if(getContext() != null)
-                        Toast.makeText(getContext(), "Falha ao carregar histórico: " + error.getMessage(), Toast.LENGTH_LONG).show();
-                }
-            };
-            stockItemsRef.addValueEventListener(historyListener);
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError error) {
+                        if (getContext() != null) {
+                            Toast.makeText(getContext(), "Falha ao carregar histórico.", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+    }
+
+    private void updateViewVisibility() {
+        if (historyList.isEmpty()) {
+            textNoHistory.setVisibility(View.VISIBLE);
+            recyclerHistory.setVisibility(View.GONE);
+        } else {
+            textNoHistory.setVisibility(View.GONE);
+            recyclerHistory.setVisibility(View.VISIBLE);
         }
     }
 
     @Override
     public void onStop() {
         super.onStop();
-        if (stockItemsRef != null && historyListener != null) {
-            stockItemsRef.removeEventListener(historyListener);
-            historyListener = null;
+        if (donationsRef != null && historyListener != null) {
+            donationsRef.removeEventListener(historyListener);
         }
     }
 }

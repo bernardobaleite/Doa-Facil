@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- REBUILD: Removing the local Toolbar to adopt the main Activity's hybrid toolbar. -->
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -84,7 +83,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="Data de Validade"
+                android:hint="Data de Validade do Produto"
                 app:boxStrokeColor="@color/watergreen">
 
                 <com.google.android.material.textfield.TextInputEditText
@@ -98,36 +97,35 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/input_layout_pickup_date"
+                android:id="@+id/input_layout_scheduled_date"
                 style="@style/Widget.MaterialComponents.TextInputLayout.FilledBox"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="Data da Retirada"
+                android:hint="Data de Disponibilidade para Coleta"
                 app:boxStrokeColor="@color/watergreen">
 
                 <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/editPickupDate"
+                    android:id="@+id/editScheduledDate"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@color/transparent"
-                    android:backgroundTint="@color/transparent"
                     android:clickable="true"
                     android:focusable="false"
                     android:inputType="none" />
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/input_layout_pickup_time"
+                android:id="@+id/input_layout_scheduled_time"
                 style="@style/Widget.MaterialComponents.TextInputLayout.FilledBox"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="Horário da Retirada"
+                android:hint="Hora de Disponibilidade para Coleta"
                 app:boxStrokeColor="@color/watergreen">
 
                 <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/editPickupTime"
+                    android:id="@+id/editScheduledTime"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@color/transparent"
@@ -137,13 +135,12 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <Button
-                android:id="@+id/buttonSaveProduct"
+                android:id="@+id/buttonSaveDonation"
                 style="@style/defaultButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
-                android:onClick="validateDataProduct"
-                android:text="Salvar" />
+                android:text="Salvar Doação" />
 
         </LinearLayout>
     </ScrollView>

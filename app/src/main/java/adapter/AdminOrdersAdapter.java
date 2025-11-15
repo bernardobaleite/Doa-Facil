@@ -25,31 +25,39 @@ import com.google.firebase.database.MutableData;
 import com.google.firebase.database.Transaction;
 
 import java.util.ArrayList;
-import java.text.DecimalFormat;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import helper.ConfigurationFirebase;
-import model.ItemDisplay;
+import model.OrderItem;
 import model.Order;
 import model.StockItem;
 
-// RE-DESIGN: Applying correct background tint to buttons with white text.
+// RE-ARCH: Implementing the user's final distinction between CANCELLATION (return stock) and OUT-OF-STOCK (remove stock).
 public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.MyViewHolder> {
+
+    public interface OnOrderInteractionListener {
+        void onOrderCancelled();
+    }
 
     private List<Order> orders;
     private Map<String, String> ongNamesMap;
     private Context context;
     private int expandedPosition = -1;
+    private final OnOrderInteractionListener listener;
 
-    public AdminOrdersAdapter(List<Order> orders, Map<String, String> ongNamesMap, Context context) {
+    public AdminOrdersAdapter(List<Order> orders, Map<String, String> ongNamesMap, Context context, OnOrderInteractionListener listener) {
         this.orders = orders;
         this.ongNamesMap = ongNamesMap;
         this.context = context;
+        this.listener = listener;
     }
 
-    public void setData(List<Order> orders) {
+    public void setData(List<Order> orders, Map<String, String> ongNamesMap) {
         this.orders = orders;
+        this.ongNamesMap = ongNamesMap;
         notifyDataSetChanged();
     }
 
@@ -68,7 +76,7 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
         setupCommonInfo(holder, order, isExpanded);
         resetStateViews(holder);
 
-        String status = order.getStatus();
+        String status = order.getOrderStatus();
         holder.currentStatus.setText(status);
         int statusColor = ContextCompat.getColor(context, R.color.grey);
         int whiteColor = ContextCompat.getColor(context, R.color.white);
@@ -77,42 +85,28 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
             case "Realize o agendamento":
                 statusColor = ContextCompat.getColor(context, R.color.status_warning_yellow);
                 holder.stateWaitingSchedule.setVisibility(View.VISIBLE);
-                holder.btnNoStock1.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_red));
-                holder.btnNoStock1.setTextColor(whiteColor);
-                holder.btnCancel1.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_red));
-                holder.btnCancel1.setTextColor(whiteColor);
-                holder.btnNoStock1.setOnClickListener(v -> updateOrderStatus(order, "Produto sem estoque/vencido"));
-                holder.btnCancel1.setOnClickListener(v -> cancelOrderAndReturnStock(order));
+                // THE FIX: Out of stock now calls the correct new method.
+                holder.btnNoStock1.setOnClickListener(v -> removeStockItemsAndSetStatus(order, "Produto sem estoque/vencido"));
+                holder.btnCancel1.setOnClickListener(v -> cancelOrderAndReturnStock(order, false));
                 break;
 
             case "Data e horários determinados - Por favor, aguarde a liberação":
                 statusColor = ContextCompat.getColor(context, R.color.status_warning_yellow);
                 holder.stateScheduleDetermined.setVisibility(View.VISIBLE);
-                holder.btnRelease.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.watergreen));
-                holder.btnRelease.setTextColor(whiteColor);
-                holder.btnReschedule1.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_warning_yellow));
-                holder.btnReschedule1.setTextColor(whiteColor);
-                holder.btnNoStock2.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_red));
-                holder.btnNoStock2.setTextColor(whiteColor);
-                holder.btnRelease.setOnClickListener(v -> updateOrderStatus(order, "Seu pedido já está disponível - Retire sua doação"));
-                holder.btnReschedule1.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento"));
-                holder.btnNoStock2.setOnClickListener(v -> updateOrderStatus(order, "Produto sem estoque/vencido"));
+                holder.btnRelease.setOnClickListener(v -> releaseOrder(order));
+                holder.btnReschedule1.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento", null));
+                // THE FIX: Out of stock now calls the correct new method.
+                holder.btnNoStock2.setOnClickListener(v -> removeStockItemsAndSetStatus(order, "Produto sem estoque/vencido"));
                 break;
 
             case "Seu pedido já está disponível - Retire sua doação":
                 statusColor = ContextCompat.getColor(context, R.color.watergreen);
                 holder.stateWaitingPickup.setVisibility(View.VISIBLE);
-                holder.btnDistributed.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.watergreen));
-                holder.btnDistributed.setTextColor(whiteColor);
-                holder.btnReschedule2.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_warning_yellow));
-                holder.btnReschedule2.setTextColor(whiteColor);
-                holder.btnCancel2.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_red));
-                holder.btnCancel2.setTextColor(whiteColor);
-                holder.btnDistributed.setOnClickListener(v -> updateOrderStatus(order, "Doação distribuída"));
-                holder.btnReschedule2.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento"));
-                holder.btnCancel2.setOnClickListener(v -> cancelOrderAndReturnStock(order));
+                holder.btnDistributed.setOnClickListener(v -> distributeOrder(order));
+                holder.btnReschedule2.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento", null));
+                holder.btnCancel2.setOnClickListener(v -> cancelOrderAndReturnStock(order, true));
                 break;
-            
+
             case "Doação distribuída":
                  statusColor = ContextCompat.getColor(context, R.color.watergreen);
                  break;
@@ -123,22 +117,19 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
                 break;
         }
         holder.currentStatus.setTextColor(statusColor);
+        styleButtons(holder, whiteColor);
     }
     
     private void setupCommonInfo(MyViewHolder holder, Order order, boolean isExpanded) {
         String ongName = ongNamesMap.get(order.getOngId());
-        holder.ongNameValue.setText(ongName != null ? ongName : order.getOngId());
+        holder.ongNameValue.setText(ongName != null ? ongName : "ID: " + order.getOngId());
         holder.orderIdValue.setText(order.getOrderId());
-
-        int distinctProductCount = (order.getItems() != null) ? order.getItems().size() : 0;
-        String summaryText = (distinctProductCount == 1) ? "Pedido com 1 produto" : "Pedido com " + distinctProductCount + " produtos";
-        holder.orderSummary.setText(summaryText);
-
-        String scheduledDateTime = (order.getScheduledDate() != null && !order.getScheduledDate().isEmpty())
-            ? "Agendado para: " + order.getScheduledDate() + " às " + order.getScheduledTime()
+        int distinctProductCount = (order.getOrderItems() != null) ? order.getOrderItems().size() : 0;
+        holder.orderSummary.setText("Pedido com " + distinctProductCount + " produtos");
+        String scheduledDateTime = (order.getOrderScheduledDateTime() != null && !order.getOrderScheduledDateTime().isEmpty())
+            ? "Agendado para: " + order.getOrderScheduledDateTime()
             : "Aguardando agendamento";
         holder.scheduledDateTime.setText(scheduledDateTime);
-
         holder.expandableLayout.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
         holder.mainInfoLayout.setOnClickListener(v -> {
             int clickedPosition = holder.getBindingAdapterPosition();
@@ -148,9 +139,8 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
             if (previousExpanded != -1) notifyItemChanged(previousExpanded);
             notifyItemChanged(clickedPosition);
         });
-
-        if (isExpanded && order.getItems() != null) {
-            List<ItemDisplay> items = new ArrayList<>(order.getItems().values());
+        if (isExpanded && order.getOrderItems() != null) {
+            List<OrderItem> items = new ArrayList<>(order.getOrderItems().values());
             OrderProductItemAdapter subAdapter = new OrderProductItemAdapter(items, context);
             holder.innerRecyclerView.setLayoutManager(new LinearLayoutManager(context));
             holder.innerRecyclerView.setAdapter(subAdapter);
@@ -163,63 +153,123 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
         holder.stateWaitingPickup.setVisibility(View.GONE);
     }
     
-    private void updateOrderStatus(Order order, String newStatus) {
-        getOrderReference(order).child("status").setValue(newStatus)
-            .addOnSuccessListener(aVoid -> Toast.makeText(context, "Status do pedido atualizado!", Toast.LENGTH_SHORT).show())
-            .addOnFailureListener(e -> {
-                String errorMessage = e.getMessage();
-                Toast.makeText(context, "Falha ao atualizar status: " + errorMessage, Toast.LENGTH_LONG).show();
-            });
-    }
-
-    private void cancelOrderAndReturnStock(Order order) {
-        if (order.getItems() == null) return;
-        for (ItemDisplay item : order.getItems().values()) {
-            returnStockForItem(item);
-        }
-        updateOrderStatus(order, "Pedido cancelado");
-    }
-
-    private void returnStockForItem(ItemDisplay itemToReturn) {
-        DatabaseReference stockItemRef = ConfigurationFirebase.getFirebaseDatabase()
-            .child("stock_items")
-            .child(itemToReturn.getEstablishmentId())
-            .child(itemToReturn.getStockItemId());
-
-        stockItemRef.runTransaction(new Transaction.Handler() {
-            @NonNull
-            @Override
-            public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
-                StockItem currentStock = mutableData.getValue(StockItem.class);
-                 if (currentStock == null) {
-                     return Transaction.abort();
-                } else {
-                    double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getStockItemQuantity();
-                    currentStock.setStockItemQuantity(newQuantity);
-                    mutableData.setValue(currentStock);
+    private void updateOrderStatus(Order order, String newStatus, @Nullable Runnable onSuccessAction) {
+        getOrderReference(order).child("orderStatus").setValue(newStatus).addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                Toast.makeText(context, "Status do pedido atualizado!", Toast.LENGTH_SHORT).show();
+                if (onSuccessAction != null) {
+                    onSuccessAction.run();
                 }
-                return Transaction.success(mutableData);
-            }
-
-            @Override
-            public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot currentData) {
-                if (error != null) {
-                    Log.e("AdminOrdersAdapter", "Stock return failed for item " + itemToReturn.getStockItemId() + ": " + error.getMessage());
-                }
+            } else {
+                Toast.makeText(context, "Falha ao atualizar status: " + task.getException().getMessage(), Toast.LENGTH_LONG).show();
             }
         });
     }
 
+    // THE FIX: New method for removing ghost stock items.
+    private void removeStockItemsAndSetStatus(Order order, String finalStatus) {
+        if (order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            updateOrderStatus(order, finalStatus, null);
+            return;
+        }
+
+        DatabaseReference rootRef = ConfigurationFirebase.getFirebaseDatabase();
+        Map<String, Object> updates = new HashMap<>();
+        
+        // Path to update the order status
+        updates.put("/orders/" + order.getOngId() + "/" + order.getOrderId() + "/orderStatus", finalStatus);
+        
+        // Paths to delete the stock items
+        for (OrderItem item : order.getOrderItems().values()) {
+            updates.put("/stock_items/" + item.getStockItemId(), null);
+        }
+
+        rootRef.updateChildren(updates).addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                Toast.makeText(context, "Itens removidos do estoque e pedido atualizado.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(context, "Falha na operação de remoção de estoque.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void cancelOrderAndReturnStock(Order order, boolean itemsWereDeducted) {
+        Runnable onCancelSuccess = () -> {
+            if (listener != null) {
+                listener.onOrderCancelled();
+            }
+        };
+        if (!itemsWereDeducted || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            updateOrderStatus(order, "Pedido cancelado", onCancelSuccess);
+            return;
+        }
+        runStockReturnTransaction(order, onCancelSuccess);
+    }
+
+    private void runStockReturnTransaction(Order order, Runnable onAllTransactionsSuccess) {
+        DatabaseReference stockRef = ConfigurationFirebase.getFirebaseDatabase().child("stock_items");
+        AtomicInteger successCounter = new AtomicInteger(0);
+        int totalItems = order.getOrderItems().size();
+        for (OrderItem itemToReturn : order.getOrderItems().values()) {
+            stockRef.child(itemToReturn.getStockItemId()).runTransaction(new Transaction.Handler() {
+                @NonNull @Override
+                public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
+                    StockItem currentStock = mutableData.getValue(StockItem.class);
+                    if (currentStock == null) return Transaction.success(mutableData);
+                    double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getOrderItemQuantity();
+                    currentStock.setStockItemQuantity(newQuantity);
+                    mutableData.setValue(currentStock);
+                    return Transaction.success(mutableData);
+                }
+
+                @Override
+                public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot dataSnapshot) {
+                    if (committed) {
+                        if (successCounter.incrementAndGet() == totalItems) {
+                            updateOrderStatus(order, "Pedido cancelado", onAllTransactionsSuccess);
+                        }
+                    } else {
+                        Toast.makeText(context, "Falha ao retornar um item ao estoque.", Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+    }
+
+    private void releaseOrder(Order order) {
+        updateOrderStatus(order, "Seu pedido já está disponível - Retire sua doação", null);
+    }
+
+    private void distributeOrder(Order order) {
+        updateOrderStatus(order, "Doação distribuída", null);
+    }
+
     private DatabaseReference getOrderReference(Order order) {
-        return ConfigurationFirebase.getFirebaseDatabase()
-            .child("orders")
-            .child(order.getOngId())
-            .child(order.getOrderId());
+        return ConfigurationFirebase.getFirebaseDatabase().child("orders").child(order.getOngId()).child(order.getOrderId());
     }
 
     @Override
     public int getItemCount() {
         return orders.size();
+    }
+    
+    private void styleButtons(MyViewHolder holder, int textColor) {
+        Button[] redButtons = {holder.btnNoStock1, holder.btnCancel1, holder.btnNoStock2, holder.btnCancel2};
+        Button[] yellowButtons = {holder.btnReschedule1, holder.btnReschedule2};
+        Button[] greenButtons = {holder.btnRelease, holder.btnDistributed};
+
+        for(Button btn : redButtons) {
+            btn.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_red));
+            btn.setTextColor(textColor);
+        }
+        for(Button btn : yellowButtons) {
+            btn.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.status_warning_yellow));
+            btn.setTextColor(textColor);
+        }
+        for(Button btn : greenButtons) {
+            btn.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.watergreen));
+            btn.setTextColor(textColor);
+        }
     }
 
     public class MyViewHolder extends RecyclerView.ViewHolder {
@@ -236,11 +286,9 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
             orderSummary = itemView.findViewById(R.id.text_order_summary_admin);
             scheduledDateTime = itemView.findViewById(R.id.text_order_scheduled_datetime);
             currentStatus = itemView.findViewById(R.id.text_current_status_value);
-
             stateWaitingSchedule = itemView.findViewById(R.id.layout_admin_state_waiting_schedule);
             stateScheduleDetermined = itemView.findViewById(R.id.layout_admin_state_schedule_determined);
             stateWaitingPickup = itemView.findViewById(R.id.layout_admin_state_waiting_pickup);
-
             btnNoStock1 = itemView.findViewById(R.id.button_admin_no_stock);
             btnCancel1 = itemView.findViewById(R.id.button_admin_cancel_order_1);
             btnRelease = itemView.findViewById(R.id.button_admin_release_donation);
@@ -249,7 +297,6 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
             btnDistributed = itemView.findViewById(R.id.button_admin_donation_distributed);
             btnReschedule2 = itemView.findViewById(R.id.button_admin_reschedule_2);
             btnCancel2 = itemView.findViewById(R.id.button_admin_cancel_order_2);
-
             mainInfoLayout = itemView.findViewById(R.id.layout_admin_main_info);
             expandableLayout = itemView.findViewById(R.id.layout_admin_expandable_items);
             innerRecyclerView = itemView.findViewById(R.id.recycler_admin_order_items_list);

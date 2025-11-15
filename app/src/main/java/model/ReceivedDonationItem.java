@@ -1,26 +1,15 @@
 package model;
 
-import com.google.firebase.database.DatabaseReference;
-
-import helper.ConfigurationFirebase;
-
-// ARCHITECTURE: Aligning Product with the user's superior data model.
-public class Product {
+// ARCHITECTURE: Implementing the user's superior data model.
+public class ReceivedDonationItem {
 
     private String productId;
     private String productName;
     private String productUnitType;
+    private double receivedQuantity;
+    private String receivedExpirationDate; // THE FIX: Add the missing field
 
-    public Product() {
-    }
-
-    public void save() {
-        DatabaseReference firebaseRef = ConfigurationFirebase.getFirebaseDatabase();
-        // THE FIX: Point to a global product catalog, not a per-establishment one.
-        DatabaseReference productRef = firebaseRef
-                .child("product_catalog") 
-                .child(this.getProductId());
-        productRef.setValue(this);
+    public ReceivedDonationItem() {
     }
 
     // --- Getters and Setters ---
@@ -47,5 +36,21 @@ public class Product {
 
     public void setProductUnitType(String productUnitType) {
         this.productUnitType = productUnitType;
+    }
+
+    public double getReceivedQuantity() {
+        return receivedQuantity;
+    }
+
+    public void setReceivedQuantity(double receivedQuantity) {
+        this.receivedQuantity = receivedQuantity;
+    }
+
+    public String getReceivedExpirationDate() {
+        return receivedExpirationDate;
+    }
+
+    public void setReceivedExpirationDate(String receivedExpirationDate) {
+        this.receivedExpirationDate = receivedExpirationDate;
     }
 }

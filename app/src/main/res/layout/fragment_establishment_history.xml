@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- REBUILD: Removing the local Toolbar to adopt the main Activity's hybrid toolbar. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<!-- REBUILD: Adding the missing TextView for the empty state. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     tools:context=".fragment.EstablishmentHistoryFragment">
 
     <androidx.recyclerview.widget.RecyclerView
@@ -16,4 +14,14 @@
         android:clipToPadding="false"
         tools:listitem="@layout/adapter_establishment_product" />
 
-</LinearLayout>
+    <TextView
+        android:id="@+id/text_no_history" 
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="Nenhum histórico de doações encontrado."
+        android:textSize="18sp"
+        android:visibility="gone" 
+        tools:visibility="visible"/>
+
+</FrameLayout>

@@ -87,8 +87,8 @@ public class OngOrdersFragment extends Fragment {
                     }
                 }
 
-                // Sort by most recent first
-                Collections.sort(orders, (o1, o2) -> Long.compare(o2.getTimestamp(), o1.getTimestamp()));
+                // THE FIX: Use the correct getter for the creation timestamp.
+                Collections.sort(orders, (o1, o2) -> Long.compare(o2.getOrderCreatedAt(), o1.getOrderCreatedAt()));
                 adapter.setData(orders);
                 updateViewVisibility();
             }

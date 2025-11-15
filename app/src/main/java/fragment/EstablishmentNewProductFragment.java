@@ -11,7 +11,6 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.Spinner;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -28,29 +27,29 @@ import com.google.firebase.database.ValueEventListener;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import activity.EstablishmentActivity;
 import adapter.HintAdapter;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
 import model.Product;
-import model.StockItem;
+import model.ReceivedDonation;
+import model.ReceivedDonationItem;
 
-// RE-ARCH: Refactoring to use the new decoupled toolbar control from EstablishmentActivity.
+// RE-ARCH: Fixing the root cause of the data corruption - capturing the productId from the Firebase key.
 public class EstablishmentNewProductFragment extends Fragment {
 
     private Spinner spinnerProduct;
-    private TextInputEditText editProductQuantity, editExpirationDate, editPickupDate, editPickupTime, textProductUnit;
-    private Button buttonSaveProduct;
+    private TextInputEditText editProductQuantity, editExpirationDate, editScheduledDate, editScheduledTime, textProductUnit;
+    private Button buttonSaveDonation;
 
     private String idCurrentUser;
     private DatabaseReference firebaseRef;
     private List<Product> productCatalogList = new ArrayList<>();
-
-    public EstablishmentNewProductFragment() {
-    }
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
@@ -61,11 +60,9 @@ public class EstablishmentNewProductFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-
         initializeComponents(view);
         idCurrentUser = UserFirebase.getIdUser();
         firebaseRef = ConfigurationFirebase.getFirebaseDatabase();
-
         loadProductCatalog();
         setupClickListeners();
     }
@@ -73,9 +70,8 @@ public class EstablishmentNewProductFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        // THE FIX: Set the toolbar title using the new decoupled method.
         if (getActivity() instanceof EstablishmentActivity) {
-            ((EstablishmentActivity) getActivity()).setToolbarTitle("Realize uma doação", EstablishmentActivity.TitleAlignment.CENTER);
+            ((EstablishmentActivity) getActivity()).setToolbarTitle("Realizar Doação", EstablishmentActivity.TitleAlignment.CENTER);
         }
     }
 
@@ -84,15 +80,15 @@ public class EstablishmentNewProductFragment extends Fragment {
             hideKeyboard(v);
             showDatePicker((TextInputEditText) v);
         };
-        editPickupDate.setOnClickListener(dateClickListener);
         editExpirationDate.setOnClickListener(dateClickListener);
-
-        editPickupTime.setOnClickListener(v -> {
+        editScheduledDate.setOnClickListener(dateClickListener);
+        
+        editScheduledTime.setOnClickListener(v -> {
             hideKeyboard(v);
             showTimePicker();
         });
 
-        buttonSaveProduct.setOnClickListener(v -> validateDataProduct());
+        buttonSaveDonation.setOnClickListener(v -> validateDataAndSave());
     }
 
     private void hideKeyboard(View view) {
@@ -105,27 +101,20 @@ public class EstablishmentNewProductFragment extends Fragment {
     private void showDatePicker(TextInputEditText dateField) {
         if (getContext() == null) return;
         Calendar calendar = Calendar.getInstance();
-        int year = calendar.get(Calendar.YEAR);
-        int month = calendar.get(Calendar.MONTH);
-        int day = calendar.get(Calendar.DAY_OF_MONTH);
-
-        DatePickerDialog datePickerDialog = new DatePickerDialog(getContext(), (dView, year1, month1, dayOfMonth) -> {
-            String selectedDate = String.format(Locale.getDefault(), "%02d/%02d/%d", dayOfMonth, month1 + 1, year1);
+        DatePickerDialog datePickerDialog = new DatePickerDialog(getContext(), (dView, year, month, dayOfMonth) -> {
+            String selectedDate = String.format(Locale.getDefault(), "%02d/%02d/%d", dayOfMonth, month + 1, year);
             dateField.setText(selectedDate);
-        }, year, month, day);
+        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH));
         datePickerDialog.show();
     }
 
     private void showTimePicker() {
         if (getContext() == null) return;
         Calendar calendar = Calendar.getInstance();
-        int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        int minute = calendar.get(Calendar.MINUTE);
-
-        TimePickerDialog timePickerDialog = new TimePickerDialog(getContext(), (tView, hourOfDay, minute1) -> {
-            String selectedTime = String.format(Locale.getDefault(), "%02d:%02d", hourOfDay, minute1);
-            editPickupTime.setText(selectedTime);
-        }, hour, minute, true);
+        TimePickerDialog timePickerDialog = new TimePickerDialog(getContext(), (tView, hourOfDay, minute) -> {
+            String selectedTime = String.format(Locale.getDefault(), "%02d:%02d", hourOfDay, minute);
+            editScheduledTime.setText(selectedTime);
+        }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), true);
         timePickerDialog.show();
     }
 
@@ -141,6 +130,7 @@ public class EstablishmentNewProductFragment extends Fragment {
                 for (DataSnapshot ds : dataSnapshot.getChildren()) {
                     Product product = ds.getValue(Product.class);
                     if (product != null && product.getProductName() != null) {
+                        // THE FIX: Capture the product ID from the snapshot's key.
                         product.setProductId(ds.getKey());
                         productCatalogList.add(product);
                         productNames.add(product.getProductName());
@@ -191,54 +181,43 @@ public class EstablishmentNewProductFragment extends Fragment {
         textProductUnit.setText("");
     }
 
-    private void validateDataProduct() {
-        if (spinnerProduct.getSelectedItemPosition() == 0) {
-            showMessage("Selecione o produto");
-            return;
-        }
-
+    private void validateDataAndSave() {
+        if (spinnerProduct.getSelectedItemPosition() == 0) { showMessage("Selecione o produto"); return; }
         String quantityStr = editProductQuantity.getText().toString();
-        if (quantityStr.isEmpty()) {
-            showMessage("Digite a quantidade");
-            return;
-        }
-
+        if (quantityStr.isEmpty()) { showMessage("Digite a quantidade"); return; }
         String expirationDate = editExpirationDate.getText().toString();
-        if (expirationDate.isEmpty()) {
-            showMessage("Selecione a data de validade");
-            return;
-        }
+        if (expirationDate.isEmpty()) { showMessage("Selecione a data de validade do produto"); return; }
+        String scheduledDate = editScheduledDate.getText().toString();
+        if (scheduledDate.isEmpty()) { showMessage("Selecione a data de disponibilidade"); return; }
+        String scheduledTime = editScheduledTime.getText().toString();
+        if (scheduledTime.isEmpty()) { showMessage("Selecione a hora de disponibilidade"); return; }
 
-        String pickupDate = editPickupDate.getText().toString();
-        String pickupTime = editPickupTime.getText().toString();
-
+        Product selectedProduct = null;
         String selectedProductName = spinnerProduct.getSelectedItem().toString();
-        String productId = null;
+        for (Product p : productCatalogList) {
+            if (p.getProductName().equals(selectedProductName)) { selectedProduct = p; break; }        }
+        if (selectedProduct == null) { showMessage("Erro: Produto selecionado inválido."); return; }
 
-        for (Product product : productCatalogList) {
-            if (product.getProductName().equals(selectedProductName)) {
-                productId = product.getProductId();
-                break;
-            }
-        }
+        ReceivedDonationItem donationItem = new ReceivedDonationItem();
+        donationItem.setProductId(selectedProduct.getProductId());
+        donationItem.setProductName(selectedProduct.getProductName());
+        donationItem.setProductUnitType(selectedProduct.getProductUnitType());
+        donationItem.setReceivedQuantity(Double.parseDouble(quantityStr));
+        donationItem.setReceivedExpirationDate(expirationDate);
 
-        if (productId == null) {
-            showMessage("Erro: ID do produto não encontrado.");
-            return;
-        }
+        ReceivedDonation newDonation = new ReceivedDonation();
+        newDonation.setEstablishmentId(idCurrentUser);
+        newDonation.setReceivedCreatedAt(System.currentTimeMillis());
+        newDonation.setReceivedScheduledDateTime(scheduledDate + " " + scheduledTime);
+        
+        Map<String, ReceivedDonationItem> itemsMap = new HashMap<>();
+        String itemKey = firebaseRef.child("received_donations").child(newDonation.getDonationId()).child("receivedItems").push().getKey();
+        itemsMap.put(itemKey, donationItem);
+        newDonation.setReceivedItems(itemsMap);
 
-        StockItem stockItem = new StockItem();
-        stockItem.setEstablishmentId(idCurrentUser);
-        stockItem.setProductId(productId);
-        stockItem.setStockItemQuantity(Double.parseDouble(quantityStr));
-        stockItem.setStockItemExpirationDate(expirationDate);
-        stockItem.setStockItemPickupDate(pickupDate);
-        stockItem.setStockItemPickupTime(pickupTime);
+        newDonation.save();
 
-        stockItem.save();
-
-        showMessage("Doação registrada! Aguardando aprovação.");
-
+        showMessage("Promessa de doação registrada com sucesso!");
         if (getActivity() instanceof EstablishmentActivity) {
             ((EstablishmentActivity) getActivity()).navigateToMyProducts();
         }
@@ -255,8 +234,8 @@ public class EstablishmentNewProductFragment extends Fragment {
         editProductQuantity = view.findViewById(R.id.editProductQuantity);
         textProductUnit = view.findViewById(R.id.textProductUnit);
         editExpirationDate = view.findViewById(R.id.editExpirationDate);
-        editPickupDate = view.findViewById(R.id.editPickupDate);
-        editPickupTime = view.findViewById(R.id.editPickupTime);
-        buttonSaveProduct = view.findViewById(R.id.buttonSaveProduct);
+        editScheduledDate = view.findViewById(R.id.editScheduledDate);
+        editScheduledTime = view.findViewById(R.id.editScheduledTime);
+        buttonSaveDonation = view.findViewById(R.id.buttonSaveDonation);
     }
 }

@@ -3,7 +3,6 @@ package adapter;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -28,7 +27,6 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.MutableData;
 import com.google.firebase.database.Transaction;
 
-import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -39,11 +37,11 @@ import java.util.Locale;
 import java.util.Map;
 
 import helper.ConfigurationFirebase;
-import model.ItemDisplay;
 import model.Order;
+import model.OrderItem;
 import model.StockItem;
 
-// RE-DESIGN: Implementing the user's color-coded state machine.
+// RE-ARCH: Implementing the final, correct UI state logic as per user's command.
 public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyViewHolder> {
 
     private List<Order> orders;
@@ -75,64 +73,58 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
         setupCommonInfo(holder, order, isExpanded);
         resetStateViews(holder);
 
-        switch (order.getStatus()) {
+        String status = order.getOrderStatus();
+        int statusColor;
+
+        // THE FIX: Correctly show/hide form vs. status text.
+        switch (status) {
             case "Realize o agendamento":
-                holder.schedulingForm.setVisibility(View.VISIBLE);
-                holder.confirmScheduleButton.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.watergreen));
-                holder.cancelButton.setVisibility(View.VISIBLE);
-                holder.cancelButton.setColorFilter(ContextCompat.getColor(context, R.color.status_red));
-                holder.cancelButton.setOnClickListener(v -> cancelOrder(order));
-                setupSchedulingControls(holder, order);
-                break;
-
             case "Realize um novo agendamento":
-                holder.statusText.setVisibility(View.VISIBLE);
-                holder.statusText.setText(order.getStatus());
-                holder.statusText.setTextColor(ContextCompat.getColor(context, R.color.status_warning_yellow));
                 holder.schedulingForm.setVisibility(View.VISIBLE);
-                holder.confirmScheduleButton.setText("Confirmar Novo Agendamento");
-                holder.confirmScheduleButton.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.watergreen));
                 holder.cancelButton.setVisibility(View.VISIBLE);
-                holder.cancelButton.setColorFilter(ContextCompat.getColor(context, R.color.status_red));
-                holder.cancelButton.setOnClickListener(v -> cancelOrder(order));
+                holder.cancelButton.setOnClickListener(v -> cancelOrder(order, false)); 
                 setupSchedulingControls(holder, order);
-                break;
-
-            case "Seu pedido já está disponível - Retire sua doação":
-                 holder.statusText.setVisibility(View.VISIBLE);
-                 holder.statusText.setText(order.getStatus());
-                 holder.statusText.setTextColor(ContextCompat.getColor(context, R.color.watergreen));
-                 // TODO: Add "Retirar agora" button logic if user requests it again.
-                 break;
+                break; // Do not show status text when form is visible.
 
             case "Data e horários determinados - Por favor, aguarde a liberação":
+                statusColor = ContextCompat.getColor(context, R.color.status_warning_yellow);
+                holder.statusText.setText(status);
+                holder.statusText.setTextColor(statusColor);
                 holder.statusText.setVisibility(View.VISIBLE);
-                holder.statusText.setText(order.getStatus());
-                holder.statusText.setTextColor(ContextCompat.getColor(context, R.color.status_warning_yellow));
+                break;
+                
+            case "Seu pedido já está disponível - Retire sua doação":
+            case "Doação distribuída":
+                statusColor = ContextCompat.getColor(context, R.color.watergreen);
+                holder.statusText.setText(status);
+                holder.statusText.setTextColor(statusColor);
+                holder.statusText.setVisibility(View.VISIBLE);
                 break;
 
             case "Pedido cancelado":
             case "Produto sem estoque/vencido":
+                statusColor = ContextCompat.getColor(context, R.color.status_red);
+                holder.statusText.setText(status);
+                holder.statusText.setTextColor(statusColor);
                 holder.statusText.setVisibility(View.VISIBLE);
-                holder.statusText.setText(order.getStatus());
-                holder.statusText.setTextColor(ContextCompat.getColor(context, R.color.status_red));
                 break;
 
-            default: // Other states like "Doação distribuída"
+            default:
+                statusColor = ContextCompat.getColor(context, R.color.grey);
+                holder.statusText.setText(status);
+                holder.statusText.setTextColor(statusColor);
                 holder.statusText.setVisibility(View.VISIBLE);
-                holder.statusText.setText(order.getStatus());
-                // Set a default or positive color for other states if needed
                 break;
         }
     }
 
     private void setupCommonInfo(MyViewHolder holder, Order order, boolean isExpanded) {
-        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy", Locale.getDefault());
-        holder.orderDate.setText("Pedido realizado em " + sdf.format(new Date(order.getTimestamp())));
+        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault());
+        holder.orderDate.setText("Pedido realizado em " + sdf.format(new Date(order.getOrderCreatedAt())));
         holder.orderIdValue.setText(order.getOrderId());
 
-        int distinctProductCount = (order.getItems() != null) ? order.getItems().size() : 0;
-        String summaryText = (distinctProductCount == 1) ? "Contém 1 produto" : "Contém " + distinctProductCount + " produtos";
+        int distinctProductCount = (order.getOrderItems() != null) ? order.getOrderItems().size() : 0;
+        String summaryText = (distinctProductCount == 1) ? "Contém 1 tipo de produto" : "Contém " + distinctProductCount + " tipos de produto";
         holder.orderSummary.setText(summaryText);
 
         holder.expandableLayout.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
@@ -145,8 +137,8 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
             notifyItemChanged(clickedPosition);
         });
 
-        if (isExpanded && order.getItems() != null) {
-            List<ItemDisplay> items = new ArrayList<>(order.getItems().values());
+        if (isExpanded && order.getOrderItems() != null) {
+            List<OrderItem> items = new ArrayList<>(order.getOrderItems().values());
             OrderProductItemAdapter subAdapter = new OrderProductItemAdapter(items, context);
             holder.innerRecyclerView.setLayoutManager(new LinearLayoutManager(context));
             holder.innerRecyclerView.setAdapter(subAdapter);
@@ -157,7 +149,6 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
         holder.schedulingForm.setVisibility(View.GONE);
         holder.statusText.setVisibility(View.GONE);
         holder.cancelButton.setVisibility(View.GONE);
-        holder.confirmScheduleButton.setText("Confirmar agendamento");
     }
 
     private void setupSchedulingControls(MyViewHolder holder, Order order) {
@@ -169,27 +160,28 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
             if (date.isEmpty() || time.isEmpty()) {
                 Toast.makeText(context, "Por favor, selecione a data e o horário.", Toast.LENGTH_SHORT).show();
             } else {
-                updateOrderSchedule(order, date, time);
+                updateOrderSchedule(order, date + " " + time);
             }
         });
     }
 
-    private void cancelOrder(Order order) {
-        DatabaseReference orderRef = getOrderReference(order);
-        if (order.getItems() != null) {
-            for (ItemDisplay item : order.getItems().values()) {
-                returnStockForItem(item);
-            }
+    private void cancelOrder(Order order, boolean mustReturnStock) {
+        if (!mustReturnStock) {
+            getOrderReference(order).child("orderStatus").setValue("Pedido cancelado")
+                    .addOnSuccessListener(aVoid -> Toast.makeText(context, "Pedido cancelado.", Toast.LENGTH_SHORT).show());
+            return;
         }
-        orderRef.child("status").setValue("Pedido cancelado")
-                .addOnSuccessListener(aVoid -> Toast.makeText(context, "Pedido cancelado.", Toast.LENGTH_SHORT).show())
-                .addOnFailureListener(e -> Toast.makeText(context, "Falha ao cancelar o pedido.", Toast.LENGTH_SHORT).show());
+
+        for (OrderItem itemToReturn : order.getOrderItems().values()) {
+            returnStockForItem(itemToReturn);
+        }
+        getOrderReference(order).child("orderStatus").setValue("Pedido cancelado")
+                .addOnSuccessListener(aVoid -> Toast.makeText(context, "Pedido cancelado.", Toast.LENGTH_SHORT).show());
     }
 
-    private void returnStockForItem(ItemDisplay itemToReturn) {
+    private void returnStockForItem(OrderItem itemToReturn) {
         DatabaseReference stockItemRef = ConfigurationFirebase.getFirebaseDatabase()
             .child("stock_items")
-            .child(itemToReturn.getEstablishmentId())
             .child(itemToReturn.getStockItemId());
 
         stockItemRef.runTransaction(new Transaction.Handler() {
@@ -199,18 +191,17 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
                 StockItem currentStock = mutableData.getValue(StockItem.class);
                 if (currentStock == null) {
                      return Transaction.abort();
-                } else {
-                    double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getStockItemQuantity();
-                    currentStock.setStockItemQuantity(newQuantity);
-                    mutableData.setValue(currentStock);
                 }
+                double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getOrderItemQuantity();
+                currentStock.setStockItemQuantity(newQuantity);
+                mutableData.setValue(currentStock);
                 return Transaction.success(mutableData);
             }
 
             @Override
             public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot currentData) {
-                if (error != null) {
-                    Log.e("OngOrdersAdapter", "Stock return failed for item " + itemToReturn.getStockItemId() + ": " + error.getMessage());
+                if (!committed) {
+                    Log.e("OngOrdersAdapter", "Stock return failed for item " + itemToReturn.getStockItemId());
                 }
             }
         });
@@ -232,11 +223,10 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
         }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), true).show();
     }
 
-    private void updateOrderSchedule(Order order, String date, String time) {
+    private void updateOrderSchedule(Order order, String dateTime) {
         Map<String, Object> updates = new HashMap<>();
-        updates.put("scheduledDate", date);
-        updates.put("scheduledTime", time);
-        updates.put("status", "Data e horários determinados - Por favor, aguarde a liberação");
+        updates.put("orderScheduledDateTime", dateTime);
+        updates.put("orderStatus", "Data e horários determinados - Por favor, aguarde a liberação");
 
         getOrderReference(order).updateChildren(updates).addOnCompleteListener(task -> {
             if (task.isSuccessful()) {
