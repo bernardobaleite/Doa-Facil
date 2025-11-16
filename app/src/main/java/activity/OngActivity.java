@@ -20,9 +20,7 @@ import fragment.OngOrdersFragment;
 import fragment.OngProfileFragment;
 import helper.ConfigurationFirebase;
 
-// RE-ARCH: Adding the navigation method for the Orders tab.
 public class OngActivity extends AppCompatActivity {
-
     private FirebaseAuth authentication;
     private BottomNavigationView bottomNavigationView;
     private Toolbar toolbar;
@@ -38,7 +36,6 @@ public class OngActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_ong);
 
-        // THE FIX: Use the correct ID for the toolbar itself, not its container.
         toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 

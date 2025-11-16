@@ -2,7 +2,6 @@ package adapter;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,11 +30,11 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import helper.ConfigurationFirebase;
-import model.OrderItem;
 import model.Order;
+import model.OrderItem;
 import model.StockItem;
 
-// RE-ARCH: Implementing the user's final distinction between CANCELLATION (return stock) and OUT-OF-STOCK (remove stock).
+// RE-ARCH: Implementing the final "Calculated Truth" architecture.
 public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.MyViewHolder> {
 
     public interface OnOrderInteractionListener {
@@ -85,9 +84,8 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
             case "Realize o agendamento":
                 statusColor = ContextCompat.getColor(context, R.color.status_warning_yellow);
                 holder.stateWaitingSchedule.setVisibility(View.VISIBLE);
-                // THE FIX: Out of stock now calls the correct new method.
                 holder.btnNoStock1.setOnClickListener(v -> removeStockItemsAndSetStatus(order, "Produto sem estoque/vencido"));
-                holder.btnCancel1.setOnClickListener(v -> cancelOrderAndReturnStock(order, false));
+                holder.btnCancel1.setOnClickListener(v -> cancelOrder(order));
                 break;
 
             case "Data e horários determinados - Por favor, aguarde a liberação":
@@ -95,7 +93,6 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
                 holder.stateScheduleDetermined.setVisibility(View.VISIBLE);
                 holder.btnRelease.setOnClickListener(v -> releaseOrder(order));
                 holder.btnReschedule1.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento", null));
-                // THE FIX: Out of stock now calls the correct new method.
                 holder.btnNoStock2.setOnClickListener(v -> removeStockItemsAndSetStatus(order, "Produto sem estoque/vencido"));
                 break;
 
@@ -104,7 +101,7 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
                 holder.stateWaitingPickup.setVisibility(View.VISIBLE);
                 holder.btnDistributed.setOnClickListener(v -> distributeOrder(order));
                 holder.btnReschedule2.setOnClickListener(v -> updateOrderStatus(order, "Realize um novo agendamento", null));
-                holder.btnCancel2.setOnClickListener(v -> cancelOrderAndReturnStock(order, true));
+                holder.btnCancel2.setOnClickListener(v -> cancelOrder(order)); // This now just cancels the order status
                 break;
 
             case "Doação distribuída":
@@ -166,24 +163,17 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
         });
     }
 
-    // THE FIX: New method for removing ghost stock items.
     private void removeStockItemsAndSetStatus(Order order, String finalStatus) {
         if (order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
             updateOrderStatus(order, finalStatus, null);
             return;
         }
-
         DatabaseReference rootRef = ConfigurationFirebase.getFirebaseDatabase();
         Map<String, Object> updates = new HashMap<>();
-        
-        // Path to update the order status
         updates.put("/orders/" + order.getOngId() + "/" + order.getOrderId() + "/orderStatus", finalStatus);
-        
-        // Paths to delete the stock items
         for (OrderItem item : order.getOrderItems().values()) {
             updates.put("/stock_items/" + item.getStockItemId(), null);
         }
-
         rootRef.updateChildren(updates).addOnCompleteListener(task -> {
             if (task.isSuccessful()) {
                 Toast.makeText(context, "Itens removidos do estoque e pedido atualizado.", Toast.LENGTH_LONG).show();
@@ -193,31 +183,34 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
         });
     }
 
-    private void cancelOrderAndReturnStock(Order order, boolean itemsWereDeducted) {
+    private void cancelOrder(Order order) {
         Runnable onCancelSuccess = () -> {
             if (listener != null) {
                 listener.onOrderCancelled();
             }
         };
-        if (!itemsWereDeducted || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
-            updateOrderStatus(order, "Pedido cancelado", onCancelSuccess);
-            return;
-        }
-        runStockReturnTransaction(order, onCancelSuccess);
+        updateOrderStatus(order, "Pedido cancelado", onCancelSuccess);
     }
 
-    private void runStockReturnTransaction(Order order, Runnable onAllTransactionsSuccess) {
+    private void releaseOrder(Order order) {
+        updateOrderStatus(order, "Seu pedido já está disponível - Retire sua doação", null);
+    }
+
+    private void distributeOrder(Order order) {
         DatabaseReference stockRef = ConfigurationFirebase.getFirebaseDatabase().child("stock_items");
         AtomicInteger successCounter = new AtomicInteger(0);
         int totalItems = order.getOrderItems().size();
-        for (OrderItem itemToReturn : order.getOrderItems().values()) {
-            stockRef.child(itemToReturn.getStockItemId()).runTransaction(new Transaction.Handler() {
+
+        for (OrderItem itemToDeduct : order.getOrderItems().values()) {
+            stockRef.child(itemToDeduct.getStockItemId()).runTransaction(new Transaction.Handler() {
                 @NonNull @Override
                 public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
                     StockItem currentStock = mutableData.getValue(StockItem.class);
-                    if (currentStock == null) return Transaction.success(mutableData);
-                    double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getOrderItemQuantity();
-                    currentStock.setStockItemQuantity(newQuantity);
+                    if (currentStock == null) {
+                        return Transaction.success(mutableData);
+                    }
+                    double newQuantity = currentStock.getStockItemQuantity() - itemToDeduct.getOrderItemQuantity();
+                    currentStock.setStockItemQuantity(Math.max(0, newQuantity));
                     mutableData.setValue(currentStock);
                     return Transaction.success(mutableData);
                 }
@@ -226,22 +219,14 @@ public class AdminOrdersAdapter extends RecyclerView.Adapter<AdminOrdersAdapter.
                 public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot dataSnapshot) {
                     if (committed) {
                         if (successCounter.incrementAndGet() == totalItems) {
-                            updateOrderStatus(order, "Pedido cancelado", onAllTransactionsSuccess);
+                            updateOrderStatus(order, "Doação distribuída", null);
                         }
                     } else {
-                        Toast.makeText(context, "Falha ao retornar um item ao estoque.", Toast.LENGTH_LONG).show();
+                        Toast.makeText(context, "Falha ao deduzir item do estoque.", Toast.LENGTH_LONG).show();
                     }
                 }
             });
         }
-    }
-
-    private void releaseOrder(Order order) {
-        updateOrderStatus(order, "Seu pedido já está disponível - Retire sua doação", null);
-    }
-
-    private void distributeOrder(Order order) {
-        updateOrderStatus(order, "Doação distribuída", null);
     }
 
     private DatabaseReference getOrderReference(Order order) {

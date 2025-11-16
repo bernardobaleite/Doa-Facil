@@ -34,11 +34,12 @@ import activity.OngActivity;
 import adapter.OngProductAdapter;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
+import model.Order;
 import model.OrderItem;
 import model.Product;
 import model.StockItem;
 
-// RE-ARCH: Fixing the fragment lifecycle to ensure data is always fresh.
+// RE-ARCH: Implementing data sanitization for robust aggregation.
 public class OngListProductsFragment extends Fragment implements OngProductAdapter.ProductInteractionListener {
 
     public static class AggregatedStockItem {
@@ -78,9 +79,13 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
     private OngProductAdapter adapter;
     private List<GroupedStockItem> fullProductList = new ArrayList<>();
     private DatabaseReference databaseRef;
-    private ValueEventListener stockItemsListener;
-    private Map<String, Product> productCatalogMap = new HashMap<>();
     private String currentOngId;
+
+    private Map<String, Product> productCatalog = new HashMap<>();
+    private Map<String, StockItem> physicalStock = new HashMap<>();
+    private Map<String, Double> reservedQuantities = new HashMap<>();
+
+    private ValueEventListener catalogListener, stockListener, ordersListener;
 
     @Nullable
     @Override
@@ -92,17 +97,8 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         setHasOptionsMenu(true);
-
-        recyclerProducts = view.findViewById(R.id.recycler_products_list);
-        textEmptyProducts = view.findViewById(R.id.text_empty_products);
+        initializeComponents(view);
         databaseRef = ConfigurationFirebase.getFirebaseDatabase();
-
-        recyclerProducts.setLayoutManager(new LinearLayoutManager(getContext()));
-        recyclerProducts.setHasFixedSize(false);
-
-        adapter = new OngProductAdapter(requireActivity(), this);
-        recyclerProducts.setAdapter(adapter);
-
         currentOngId = UserFirebase.getIdUser();
     }
 
@@ -117,7 +113,7 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
         Map<String, Object> cartUpdates = new HashMap<>();
 
         for (OrderItem item : items) {
-            Product productDetails = productCatalogMap.get(item.getProductId());
+            Product productDetails = productCatalog.get(item.getProductId());
             if (productDetails != null) {
                 item.setProductName(productDetails.getProductName());
                 item.setProductUnitType(productDetails.getProductUnitType());
@@ -134,104 +130,145 @@ public class OngListProductsFragment extends Fragment implements OngProductAdapt
         });
     }
     
-    private void loadProductCatalog() {
-        DatabaseReference catalogRef = databaseRef.child("establishment_product_catalog");
-        catalogRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                productCatalogMap.clear();
-                for (DataSnapshot ds : snapshot.getChildren()) {
-                    Product product = ds.getValue(Product.class);
-                    if (product != null) {
-                        product.setProductId(ds.getKey());
-                        productCatalogMap.put(product.getProductId(), product);
-                    }
-                }
-                listenForAvailableItems();
-            }
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if (getContext() != null) Toast.makeText(getContext(), "Falha ao carregar catálogo: " + error.getMessage(), Toast.LENGTH_LONG).show();
-                updateViewVisibility(true);
-            }
-        });
-    }
-
-    private void listenForAvailableItems() {
-        DatabaseReference stockRef = databaseRef.child("stock_items");
-        if (stockItemsListener != null) { 
-            stockRef.removeEventListener(stockItemsListener);
-        }
-        stockItemsListener = stockRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                Map<String, List<StockItem>> groupedByProduct = new HashMap<>();
-                for (DataSnapshot ds : snapshot.getChildren()) {
-                    StockItem stockItem = ds.getValue(StockItem.class);
-                    if (stockItem != null && "Disponível".equals(stockItem.getStockItemStatus()) && stockItem.getStockItemQuantity() > 0) {
-                        groupedByProduct.computeIfAbsent(stockItem.getProductId(), k -> new ArrayList<>()).add(stockItem);
-                    }
-                }
-
-                fullProductList.clear();
-                for (Map.Entry<String, List<StockItem>> entry : groupedByProduct.entrySet()) {
-                    String productId = entry.getKey();
-                    Product productDetails = productCatalogMap.get(productId);
-                    if (productDetails != null) {
-                        Map<String, AggregatedStockItem> aggregatedMap = new HashMap<>();
-                        for(StockItem item : entry.getValue()){
-                            String expirationDate = item.getStockItemExpirationDate();
-                            aggregatedMap.computeIfAbsent(expirationDate, k -> new AggregatedStockItem(k)).addStockItem(item);
-                        }
-
-                        List<AggregatedStockItem> aggregatedList = new ArrayList<>(aggregatedMap.values());
-                        Collections.sort(aggregatedList, (o1, o2) -> o1.getExpirationDate().compareTo(o2.getExpirationDate()));
-
-                        GroupedStockItem newGroup = new GroupedStockItem(
-                            productDetails.getProductName(),
-                            productDetails.getProductUnitType(),
-                            aggregatedList
-                        );
-                        fullProductList.add(newGroup);
-                    }
-                }
-                
-                Collections.sort(fullProductList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
-                
-                adapter.setData(new ArrayList<>(fullProductList));
-                updateViewVisibility(fullProductList.isEmpty());
-            }
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                if(getContext() != null) Toast.makeText(getContext(), "Falha ao carregar estoque: " + error.getMessage(), Toast.LENGTH_LONG).show();
-                updateViewVisibility(true);
-            }
-        });
-    }
-
-    // THE FIX: Attach listeners in onResume to get fresh data.
     @Override
     public void onResume() {
         super.onResume();
         if (getActivity() instanceof OngActivity) {
             ((OngActivity) getActivity()).setToolbarTitle("Produtos Disponíveis", OngActivity.TitleAlignment.LEFT);
         }
-        if (currentOngId != null) {
-            loadProductCatalog(); // Starts the listener chain
-        } else {
-            Toast.makeText(getContext(), "Erro: Usuário não autenticado.", Toast.LENGTH_LONG).show();
-            updateViewVisibility(true);
-        }
+        attachListeners();
     }
 
-    // THE FIX: Detach listeners in onStop to prevent leaks and unnecessary background updates.
     @Override
     public void onStop() {
         super.onStop();
-        if (stockItemsListener != null && databaseRef != null) {
-            databaseRef.child("stock_items").removeEventListener(stockItemsListener);
+        detachListeners();
+    }
+
+    private void attachListeners() {
+        detachListeners();
+
+        catalogListener = databaseRef.child("establishment_product_catalog").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                productCatalog.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    Product p = ds.getValue(Product.class);
+                    if (p != null) {
+                        p.setProductId(ds.getKey());
+                        productCatalog.put(p.getProductId(), p);
+                    }
+                }
+                calculateAndDisplayProducts();
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) { /* Handle error */ }
+        });
+
+        stockListener = databaseRef.child("stock_items").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                physicalStock.clear();
+                for (DataSnapshot ds : snapshot.getChildren()) {
+                    StockItem si = ds.getValue(StockItem.class);
+                    if (si != null) {
+                        si.setStockItemId(ds.getKey());
+                        physicalStock.put(si.getStockItemId(), si);
+                    }
+                }
+                calculateAndDisplayProducts();
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) { /* Handle error */ }
+        });
+
+        ordersListener = databaseRef.child("orders").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                reservedQuantities.clear();
+                for (DataSnapshot ongDs : snapshot.getChildren()) {
+                    for (DataSnapshot orderDs : ongDs.getChildren()) {
+                        Order order = orderDs.getValue(Order.class);
+                        if (order != null && (order.getOrderStatus().equals("Realize o agendamento") || order.getOrderStatus().equals("Realize um novo agendamento") || order.getOrderStatus().equals("Data e horários determinados - Por favor, aguarde a liberação"))) {
+                            if (order.getOrderItems() != null) {
+                                for (OrderItem item : order.getOrderItems().values()) {
+                                    reservedQuantities.merge(item.getStockItemId(), item.getOrderItemQuantity(), Double::sum);
+                                }
+                            }
+                        }
+                    }
+                }
+                calculateAndDisplayProducts();
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) { /* Handle error */ }
+        });
+    }
+
+    private void detachListeners() {
+        if (catalogListener != null) databaseRef.child("establishment_product_catalog").removeEventListener(catalogListener);
+        if (stockListener != null) databaseRef.child("stock_items").removeEventListener(stockListener);
+        if (ordersListener != null) databaseRef.child("orders").removeEventListener(ordersListener);
+    }
+
+    private void calculateAndDisplayProducts() {
+        if (!isAdded() || productCatalog.isEmpty() || physicalStock.isEmpty()) {
+            return;
         }
-        // Note: The catalog listener is a single-value-event listener and does not need to be removed.
+
+        Map<String, List<StockItem>> availableStockByProduct = new HashMap<>();
+
+        for (StockItem physicalItem : physicalStock.values()) {
+            if (!"Disponível".equals(physicalItem.getStockItemStatus())) {
+                continue;
+            }
+            
+            double reserved = reservedQuantities.getOrDefault(physicalItem.getStockItemId(), 0.0);
+            double available = physicalItem.getStockItemQuantity() - reserved;
+
+            if (available > 0) {
+                StockItem availableItem = new StockItem();
+                availableItem.setStockItemId(physicalItem.getStockItemId());
+                availableItem.setProductId(physicalItem.getProductId());
+                availableItem.setStockItemExpirationDate(physicalItem.getStockItemExpirationDate());
+                availableItem.setStockItemQuantity(available); 
+
+                availableStockByProduct.computeIfAbsent(physicalItem.getProductId(), k -> new ArrayList<>()).add(availableItem);
+            }
+        }
+
+        fullProductList.clear();
+        for (Map.Entry<String, List<StockItem>> entry : availableStockByProduct.entrySet()) {
+            String productId = entry.getKey();
+            Product productDetails = productCatalog.get(productId);
+            if (productDetails != null) {
+                Map<String, AggregatedStockItem> aggregatedMap = new HashMap<>();
+                for(StockItem item : entry.getValue()){
+                    // THE FIX: Sanitize the key to prevent grouping failures due to whitespace.
+                    String expirationDate = item.getStockItemExpirationDate() != null ? item.getStockItemExpirationDate().trim() : "";
+                    aggregatedMap.computeIfAbsent(expirationDate, k -> new AggregatedStockItem(k)).addStockItem(item);
+                }
+                List<AggregatedStockItem> aggregatedList = new ArrayList<>(aggregatedMap.values());
+                Collections.sort(aggregatedList, (o1, o2) -> o1.getExpirationDate().compareTo(o2.getExpirationDate()));
+
+                fullProductList.add(new GroupedStockItem(
+                    productDetails.getProductName(),
+                    productDetails.getProductUnitType(),
+                    aggregatedList
+                ));
+            }
+        }
+        
+        Collections.sort(fullProductList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
+        
+        adapter.setData(new ArrayList<>(fullProductList));
+        updateViewVisibility(fullProductList.isEmpty());
+    }
+
+    private void initializeComponents(View view) {
+        recyclerProducts = view.findViewById(R.id.recycler_products_list);
+        textEmptyProducts = view.findViewById(R.id.text_empty_products);
+        recyclerProducts.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerProducts.setHasFixedSize(false);
+        adapter = new OngProductAdapter(requireActivity(), this);
+        recyclerProducts.setAdapter(adapter);
     }
 
     private void filter(String text) {

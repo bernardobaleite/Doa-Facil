@@ -17,8 +17,6 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.MutableData;
-import com.google.firebase.database.Transaction;
 import com.google.firebase.database.ValueEventListener;
 
 import java.util.ArrayList;
@@ -26,7 +24,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import activity.OngActivity;
 import adapter.OngCartAdapter;
@@ -38,7 +35,7 @@ import model.OrderItem;
 import model.Product;
 import model.StockItem;
 
-// RE-ARCH: Implementing a fully reactive, multi-listener architecture to prevent race conditions.
+// RE-ARCH: Implementing the final, unified cart view architecture.
 public class OngCartFragment extends Fragment {
 
     public static class CartDisplayItem {
@@ -51,9 +48,22 @@ public class OngCartFragment extends Fragment {
             this.orderItem = orderItem;
             this.productDetails = productDetails;
         }
+    }
 
-        public String getProductName() {
-            return productDetails != null ? productDetails.getProductName() : "Produto Desconhecido";
+    public static class UnifiedCartItem {
+        public final String expirationDate;
+        public double totalQuantity = 0;
+        public final String unitType;
+        public final List<OrderItem> originalOrderItems = new ArrayList<>();
+
+        public UnifiedCartItem(String expirationDate, String unitType) {
+            this.expirationDate = expirationDate;
+            this.unitType = unitType;
+        }
+
+        public void addCartDisplayItem(CartDisplayItem item) {
+            this.originalOrderItems.add(item.orderItem);
+            this.totalQuantity += item.orderItem.getOrderItemQuantity();
         }
     }
 
@@ -62,12 +72,13 @@ public class OngCartFragment extends Fragment {
     private FloatingActionButton fabConfirmOrder;
 
     private DatabaseReference dbRef;
-    private ValueEventListener cartListener, catalogListener, stockListener;
+    private ValueEventListener cartListener, catalogListener, stockListener, ordersListener;
     private String currentOngId;
 
     private List<OrderItem> cartPointers = new ArrayList<>();
     private Map<String, Product> productCatalogMap = new HashMap<>();
     private Map<String, StockItem> allStockItemsMap = new HashMap<>();
+    private Map<String, Double> reservedQuantities = new HashMap<>();
 
     @Nullable
     @Override
@@ -80,6 +91,7 @@ public class OngCartFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         initializeComponents(view);
         dbRef = ConfigurationFirebase.getFirebaseDatabase();
+        currentOngId = UserFirebase.getIdUser();
 
         fabConfirmOrder.setOnClickListener(v -> {
             if (cartPointers.isEmpty()) {
@@ -88,18 +100,38 @@ public class OngCartFragment extends Fragment {
                 showConfirmOrderDialog();
             }
         });
+    }
 
-        currentOngId = UserFirebase.getIdUser();
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (getActivity() instanceof OngActivity) {
+            ((OngActivity) getActivity()).setToolbarTitle("Carrinho", OngActivity.TitleAlignment.CENTER);
+        }
         if (currentOngId != null) {
             attachListeners();
         }
     }
 
+    @Override
+    public void onStop() {
+        super.onStop();
+        detachListeners();
+    }
+
     private void attachListeners() {
-        // Attach persistent listeners to all data sources.
+        detachListeners();
         catalogListener = dbRef.child("establishment_product_catalog").addValueEventListener(createCatalogListener());
         stockListener = dbRef.child("stock_items").addValueEventListener(createStockListener());
+        ordersListener = dbRef.child("orders").addValueEventListener(createOrdersListener());
         cartListener = dbRef.child("shopping_carts").child(currentOngId).addValueEventListener(createCartListener());
+    }
+
+    private void detachListeners() {
+        if (catalogListener != null) dbRef.child("establishment_product_catalog").removeEventListener(catalogListener);
+        if (stockListener != null) dbRef.child("stock_items").removeEventListener(stockListener);
+        if (ordersListener != null) dbRef.child("orders").removeEventListener(ordersListener);
+        if (cartListener != null && currentOngId != null) dbRef.child("shopping_carts").child(currentOngId).removeEventListener(cartListener);
     }
 
     private ValueEventListener createCatalogListener() {
@@ -108,10 +140,10 @@ public class OngCartFragment extends Fragment {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 productCatalogMap.clear();
                 for (DataSnapshot ds : snapshot.getChildren()) {
-                    Product product = ds.getValue(Product.class);
-                    if (product != null) {
-                        product.setProductId(ds.getKey());
-                        productCatalogMap.put(product.getProductId(), product);
+                    Product p = ds.getValue(Product.class);
+                    if (p != null) {
+                        p.setProductId(ds.getKey());
+                        productCatalogMap.put(p.getProductId(), p);
                     }
                 }
                 combineDataAndRefreshUI();
@@ -128,12 +160,36 @@ public class OngCartFragment extends Fragment {
                 for (DataSnapshot ds : snapshot.getChildren()) {
                     StockItem item = ds.getValue(StockItem.class);
                     if (item != null) {
+                        item.setStockItemId(ds.getKey());
                         allStockItemsMap.put(ds.getKey(), item);
                     }
                 }
                 combineDataAndRefreshUI();
             }
             @Override public void onCancelled(@NonNull DatabaseError e) { showToast("Falha ao carregar estoque."); }
+        };
+    }
+    
+    private ValueEventListener createOrdersListener() {
+        return new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                reservedQuantities.clear();
+                 for (DataSnapshot ongDs : snapshot.getChildren()) {
+                    for (DataSnapshot orderDs : ongDs.getChildren()) {
+                        Order order = orderDs.getValue(Order.class);
+                        if (order != null && (order.getOrderStatus().equals("Realize o agendamento") || order.getOrderStatus().equals("Realize um novo agendamento") || order.getOrderStatus().equals("Data e horários determinados - Por favor, aguarde a liberação"))) {
+                            if (order.getOrderItems() != null) {
+                                for (OrderItem item : order.getOrderItems().values()) {
+                                    reservedQuantities.merge(item.getStockItemId(), item.getOrderItemQuantity(), Double::sum);
+                                }
+                            }
+                        }
+                    }
+                }
+                combineDataAndRefreshUI();
+            }
+            @Override public void onCancelled(@NonNull DatabaseError e) { /* Handle error */ }
         };
     }
 
@@ -153,21 +209,23 @@ public class OngCartFragment extends Fragment {
 
     private void combineDataAndRefreshUI() {
         if (!isAdded() || productCatalogMap.isEmpty() || allStockItemsMap.isEmpty()) {
-            return; // Wait for all data sources to be loaded at least once.
+            return;
         }
 
         List<CartDisplayItem> displayItems = new ArrayList<>();
         List<String> itemsToRemoveFromCart = new ArrayList<>();
 
         for (OrderItem pointer : cartPointers) {
-            if(pointer == null || pointer.getStockItemId() == null) continue;
+            if (pointer == null || pointer.getStockItemId() == null) continue;
 
-            StockItem stockItem = allStockItemsMap.get(pointer.getStockItemId());
+            StockItem physicalItem = allStockItemsMap.get(pointer.getStockItemId());
+            if (physicalItem != null) {
+                Product productDetails = productCatalogMap.get(physicalItem.getProductId());
+                double reserved = reservedQuantities.getOrDefault(physicalItem.getStockItemId(), 0.0);
+                double available = physicalItem.getStockItemQuantity() - reserved;
 
-            if (stockItem != null) {
-                Product productDetails = productCatalogMap.get(stockItem.getProductId());
-                if ("Disponível".equals(stockItem.getStockItemStatus()) && stockItem.getStockItemQuantity() >= pointer.getOrderItemQuantity()) {
-                    displayItems.add(new CartDisplayItem(stockItem, pointer, productDetails));
+                if ("Disponível".equals(physicalItem.getStockItemStatus()) && available >= pointer.getOrderItemQuantity()) {
+                    displayItems.add(new CartDisplayItem(physicalItem, pointer, productDetails));
                 } else {
                     itemsToRemoveFromCart.add(pointer.getStockItemId());
                 }
@@ -185,37 +243,42 @@ public class OngCartFragment extends Fragment {
                 updates.put(itemIdToRemove, null);
             }
             cartRef.updateChildren(updates);
-            showToast("Alguns itens não estão mais disponíveis e foram removidos.");
         }
     }
 
     private void updateAdapter(List<CartDisplayItem> items) {
         fabConfirmOrder.setVisibility(!items.isEmpty() ? View.VISIBLE : View.GONE);
-        Map<String, GroupedProduct<CartDisplayItem>> groupedMap = new HashMap<>();
-        for (CartDisplayItem item : items) {
-            GroupedProduct<CartDisplayItem> group = groupedMap.computeIfAbsent(item.getProductName(), k -> new GroupedProduct<>(item.getProductName(), new ArrayList<>()));
-            group.getItems().add(item);
-        }
-        List<GroupedProduct<CartDisplayItem>> groupedList = new ArrayList<>(groupedMap.values());
-        Collections.sort(groupedList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
-        adapter.setData(groupedList);
-    }
-    
-    // ... (Transaction logic remains the same) ...
 
-    @Override
-    public void onStop() {
-        super.onStop();
-        // Detach all listeners to prevent memory leaks.
-        if (cartListener != null) dbRef.child("shopping_carts").child(currentOngId).removeEventListener(cartListener);
-        if (catalogListener != null) dbRef.child("establishment_product_catalog").removeEventListener(catalogListener);
-        if (stockListener != null) dbRef.child("stock_items").removeEventListener(stockListener);
-    }
-    
-    private void showToast(String message) {
-        if (getContext() != null) {
-            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+        Map<String, List<CartDisplayItem>> itemsByProduct = new HashMap<>();
+        for (CartDisplayItem item : items) {
+            itemsByProduct.computeIfAbsent(item.orderItem.getProductName(), k -> new ArrayList<>()).add(item);
         }
+
+        List<GroupedProduct<UnifiedCartItem>> finalList = new ArrayList<>();
+
+        for (Map.Entry<String, List<CartDisplayItem>> entry : itemsByProduct.entrySet()) {
+            String productName = entry.getKey();
+            List<CartDisplayItem> productItems = entry.getValue();
+
+            if (productItems.isEmpty()) continue;
+
+            final String unitType = productItems.get(0).productDetails != null ? productItems.get(0).productDetails.getProductUnitType() : "";
+            
+            Map<String, UnifiedCartItem> unifiedByDate = new HashMap<>();
+
+            for (CartDisplayItem item : productItems) {
+                // THE FIX: Sanitize the expiration date key, just like in the other fragment.
+                String expiration = item.stockItem.getStockItemExpirationDate() != null ? item.stockItem.getStockItemExpirationDate().trim() : "";
+                UnifiedCartItem unifiedItem = unifiedByDate.computeIfAbsent(expiration, k -> new UnifiedCartItem(k, unitType));
+                unifiedItem.addCartDisplayItem(item);
+            }
+
+            List<UnifiedCartItem> unifiedList = new ArrayList<>(unifiedByDate.values());
+            finalList.add(new GroupedProduct<>(productName, unifiedList));
+        }
+        
+        Collections.sort(finalList, (o1, o2) -> o1.getProductName().compareToIgnoreCase(o2.getProductName()));
+        adapter.setData(finalList);
     }
 
     private void initializeComponents(View view) {
@@ -229,64 +292,10 @@ public class OngCartFragment extends Fragment {
     private void showConfirmOrderDialog() {
         new AlertDialog.Builder(requireContext())
                 .setTitle("Confirmar Pedido")
-                .setMessage("Os itens do pedido serão deduzidos do estoque. Deseja confirmar?")
-                .setPositiveButton("Confirmar", (dialog, which) -> runStockDeductionTransactions())
+                .setMessage("Deseja confirmar o seu pedido?")
+                .setPositiveButton("Confirmar", (dialog, which) -> createOrderAndClearCart())
                 .setNegativeButton("Cancelar", null)
                 .show();
-    }
-
-    private void runStockDeductionTransactions() {
-        final int totalItemsToProcess = cartPointers.size();
-        if (totalItemsToProcess == 0) return;
-
-        final AtomicInteger successCounter = new AtomicInteger(0);
-        final List<String> failedItemIds = new ArrayList<>();
-
-        for (OrderItem pointer : cartPointers) {
-            DatabaseReference stockItemRef = dbRef.child("stock_items").child(pointer.getStockItemId());
-
-            stockItemRef.runTransaction(new Transaction.Handler() {
-                @NonNull
-                @Override
-                public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
-                    StockItem stockItem = mutableData.getValue(StockItem.class);
-                    if (stockItem == null || !"Disponível".equals(stockItem.getStockItemStatus())) {
-                        return Transaction.abort();
-                    }
-                    double currentQuantity = stockItem.getStockItemQuantity();
-                    double requestedQuantity = pointer.getOrderItemQuantity();
-
-                    if (currentQuantity < requestedQuantity) {
-                        return Transaction.abort();
-                    }
-                    stockItem.setStockItemQuantity(currentQuantity - requestedQuantity);
-                    mutableData.setValue(stockItem);
-                    return Transaction.success(mutableData);
-                }
-
-                @Override
-                public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot dataSnapshot) {
-                    if (!committed) {
-                        failedItemIds.add(pointer.getStockItemId());
-                    }
-                    if (successCounter.incrementAndGet() == totalItemsToProcess) {
-                        onAllTransactionsComplete(failedItemIds);
-                    }
-                }
-            });
-        }
-    }
-
-    private void onAllTransactionsComplete(List<String> failedItemIds) {
-        if (!failedItemIds.isEmpty()) {
-            DatabaseReference cartRef = dbRef.child("shopping_carts").child(currentOngId);
-            for(String failedId : failedItemIds) {
-                cartRef.child(failedId).removeValue();
-            }
-            showToast("Alguns itens não estão mais disponíveis e foram removidos do seu carrinho.");
-        } else {
-            createOrderAndClearCart();
-        }
     }
 
     private void createOrderAndClearCart() {
@@ -319,5 +328,11 @@ public class OngCartFragment extends Fragment {
                 showToast("Falha ao salvar o pedido.");
             }
         });
+    }
+    
+    private void showToast(String message) {
+        if (getContext() != null) {
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+        }
     }
 }

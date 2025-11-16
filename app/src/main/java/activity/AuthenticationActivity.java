@@ -35,7 +35,6 @@ import com.google.firebase.auth.FirebaseUser;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
 
-// REBUILD: Restoring the OnEditorActionListener that was deleted by mistake.
 public class AuthenticationActivity extends AppCompatActivity {
     private Button buttonAccess;
     private EditText emailField, passwordField, editAdminPassword;
@@ -124,7 +123,6 @@ public class AuthenticationActivity extends AppCompatActivity {
 
         buttonAdminConfirm.setOnClickListener(v -> checkAdminPassword());
 
-        // THE FIX: Restoring the listener for the keyboard's "Done" action
         editAdminPassword.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 checkAdminPassword();

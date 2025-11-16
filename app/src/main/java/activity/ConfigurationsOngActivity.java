@@ -19,7 +19,6 @@ import helper.ConfigurationFirebase;
 import helper.UserFirebase;
 import model.ProfileOng;
 
-// REBUILD: Adding proper error message logging for debugging.
 public class ConfigurationsOngActivity extends AppCompatActivity {
 
     private EditText editOngCnpj, editOngName, editOngAddress, editOngArea;
@@ -66,7 +65,6 @@ public class ConfigurationsOngActivity extends AppCompatActivity {
 
             @Override
             public void onCancelled(@NonNull DatabaseError databaseError) {
-                // THE FIX: Displaying the actual Firebase error message.
                 Toast.makeText(ConfigurationsOngActivity.this, "Falha: " + databaseError.getMessage(), Toast.LENGTH_LONG).show();
             }
         });

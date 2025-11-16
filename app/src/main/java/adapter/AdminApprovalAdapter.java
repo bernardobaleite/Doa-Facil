@@ -30,7 +30,6 @@ import helper.ConfigurationFirebase;
 import model.ReceivedDonationItem;
 import model.StockItem;
 
-// RE-DESIGN: Correctly mapping all data to the new layout fields.
 public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdapter.MyViewHolder> {
 
     private List<AdminApprovalItem> items;
@@ -58,7 +57,6 @@ public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdap
         AdminApprovalItem displayItem = items.get(position);
         String status = displayItem.effectiveStatus;
 
-        // THE FIX: Correctly map all data to the new layout.
         holder.establishmentName.setText("- " + displayItem.establishmentName);
         holder.establishmentAddress.setText(displayItem.establishmentAddress);
         holder.collectionDate.setText("Data para coleta: " + displayItem.donation.getReceivedScheduledDateTime());
@@ -84,7 +82,7 @@ public class AdminApprovalAdapter extends RecyclerView.Adapter<AdminApprovalAdap
         switch (status) {
             case "Aguarde a coleta":
                 holder.pendingActionsLayout.setVisibility(View.VISIBLE);
-                holder.approveButton.setText("Aprovar"); // Changed from "Confirmar Coleta" to "Aprovar"
+                holder.approveButton.setText("Aprovar");
                 holder.approveButton.setOnClickListener(v -> confirmCollection(displayItem));
                 holder.cancelButton.setOnClickListener(v -> cancelDonation(displayItem));
                 break;

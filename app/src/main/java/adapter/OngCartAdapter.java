@@ -12,26 +12,29 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.company.doafacil.R;
 import com.google.android.material.imageview.ShapeableImageView;
 import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
 
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import fragment.OngCartFragment.CartDisplayItem;
+import fragment.OngCartFragment.UnifiedCartItem;
 import helper.ConfigurationFirebase;
 import helper.UserFirebase;
 import model.GroupedProduct;
 import model.OrderItem;
 
-// RE-ARCH: Removing the faulty expandable logic that caused the compile error.
+// RE-ARCH: Aligning the adapter with the new UnifiedCartItem ViewModel.
 public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHolder> {
 
-    private List<GroupedProduct<CartDisplayItem>> productList;
+    private List<GroupedProduct<UnifiedCartItem>> productList;
     private final Context context;
     private final List<Integer> placeholderImages;
 
-    public OngCartAdapter(Context context, List<GroupedProduct<CartDisplayItem>> productList) {
+    public OngCartAdapter(Context context, List<GroupedProduct<UnifiedCartItem>> productList) {
         this.context = context;
         this.productList = productList != null ? productList : new ArrayList<>();
         this.placeholderImages = Arrays.asList(
@@ -47,7 +50,7 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
         return productList.get(position).getProductName().hashCode();
     }
 
-    public void setData(List<GroupedProduct<CartDisplayItem>> productList) {
+    public void setData(List<GroupedProduct<UnifiedCartItem>> productList) {
         this.productList = productList;
         notifyDataSetChanged();
     }
@@ -61,20 +64,17 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
 
     @Override
     public void onBindViewHolder(@NonNull MyViewHolder holder, int position) {
-        GroupedProduct<CartDisplayItem> group = productList.get(position);
+        GroupedProduct<UnifiedCartItem> group = productList.get(position);
 
         holder.productName.setText(group.getProductName());
 
         double totalQuantityInCart = 0;
         String unitType = "";
         if (group.getItems() != null && !group.getItems().isEmpty()) {
-            CartDisplayItem firstItem = group.getItems().get(0);
-            if (firstItem.productDetails != null) {
-                unitType = firstItem.productDetails.getProductUnitType();
-            }
-            if (unitType == null) unitType = "";
-            for (CartDisplayItem item : group.getItems()) {
-                totalQuantityInCart += item.orderItem.getOrderItemQuantity();
+            UnifiedCartItem firstItem = group.getItems().get(0);
+            unitType = firstItem.unitType;
+            for (UnifiedCartItem item : group.getItems()) {
+                totalQuantityInCart += item.totalQuantity;
             }
         }
         DecimalFormat formatter = new DecimalFormat("0.##");
@@ -84,24 +84,22 @@ public class OngCartAdapter extends RecyclerView.Adapter<OngCartAdapter.MyViewHo
         int imageIndex = Math.abs(group.getProductName().hashCode()) % placeholderImages.size();
         holder.productImage.setImageDrawable(ContextCompat.getDrawable(context, placeholderImages.get(imageIndex)));
 
-        // The nested RecyclerView is now always visible, as per the layout file.
-        OngCartItemAdapter itemAdapter = new OngCartItemAdapter(context, group.getItems(), this::removeItemFromCart);
+        OngCartItemAdapter itemAdapter = new OngCartItemAdapter(context, group.getItems(), this::removeItemsFromCart);
         holder.itemsRecyclerView.setLayoutManager(new LinearLayoutManager(context));
         holder.itemsRecyclerView.setAdapter(itemAdapter);
         holder.itemsRecyclerView.setNestedScrollingEnabled(false);
     }
     
-    private void removeItemFromCart(OrderItem orderItem) {
+    private void removeItemsFromCart(List<OrderItem> itemsToRemove) {
         String ongId = UserFirebase.getIdUser();
         if (ongId == null) return;
         
-        DatabaseReference cartItemRef = ConfigurationFirebase.getFirebaseDatabase()
-                .child("shopping_carts")
-                .child(ongId)
-                .child(orderItem.getStockItemId());
-        
-        cartItemRef.removeValue();
-        // The fragment's listener will handle the UI update.
+        DatabaseReference cartRef = FirebaseDatabase.getInstance().getReference("shopping_carts").child(ongId);
+        Map<String, Object> updates = new HashMap<>();
+        for (OrderItem item : itemsToRemove) {
+            updates.put(item.getStockItemId(), null);
+        }
+        cartRef.updateChildren(updates);
     }
 
     @Override

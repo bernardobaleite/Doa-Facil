@@ -14,21 +14,22 @@ import com.company.doafacil.R;
 import java.text.DecimalFormat;
 import java.util.List;
 
-import fragment.OngCartFragment.CartDisplayItem;
+import fragment.OngCartFragment.UnifiedCartItem;
 import model.OrderItem;
 
-// RE-ARCH: Fixing the final compile error by using the correct view ID.
+// RE-ARCH: Aligning the nested adapter with the new UnifiedCartItem ViewModel.
 public class OngCartItemAdapter extends RecyclerView.Adapter<OngCartItemAdapter.ItemViewHolder> {
 
     private final Context context;
-    private final List<CartDisplayItem> items;
+    private final List<UnifiedCartItem> items;
     private final OnItemRemoveListener listener;
 
+    // The listener now passes up a list of original items to be removed.
     public interface OnItemRemoveListener {
-        void onRemoveClicked(OrderItem item);
+        void onRemoveClicked(List<OrderItem> items);
     }
 
-    public OngCartItemAdapter(Context context, List<CartDisplayItem> items, OnItemRemoveListener listener) {
+    public OngCartItemAdapter(Context context, List<UnifiedCartItem> items, OnItemRemoveListener listener) {
         this.context = context;
         this.items = items;
         this.listener = listener;
@@ -43,26 +44,22 @@ public class OngCartItemAdapter extends RecyclerView.Adapter<OngCartItemAdapter.
 
     @Override
     public void onBindViewHolder(@NonNull ItemViewHolder holder, int position) {
-        CartDisplayItem displayItem = items.get(position);
+        UnifiedCartItem unifiedItem = items.get(position);
 
         DecimalFormat formatter = new DecimalFormat("0.##");
-        String formattedQuantity = formatter.format(displayItem.orderItem.getOrderItemQuantity());
+        String formattedQuantity = formatter.format(unifiedItem.totalQuantity);
         
-        String unitType = "";
-        if(displayItem.productDetails != null){
-            unitType = displayItem.productDetails.getProductUnitType();
-        }
+        String quantityText = "Qtd: " + formattedQuantity + " " + unifiedItem.unitType;
 
-        String quantityText = "Qtd: " + formattedQuantity + " " + unitType;
-
-        holder.expirationDate.setText("Validade: " + displayItem.stockItem.getStockItemExpirationDate());
+        holder.expirationDate.setText("Validade: " + unifiedItem.expirationDate);
         holder.quantity.setText(quantityText.trim());
 
         holder.actionButton.setImageResource(R.drawable.ic_cancel_24dp);
         holder.actionButton.setColorFilter(ContextCompat.getColor(context, R.color.status_red));
         holder.actionButton.setOnClickListener(v -> {
             if (listener != null) {
-                listener.onRemoveClicked(displayItem.orderItem);
+                // When a unified item is removed, all its underlying original items must be removed.
+                listener.onRemoveClicked(unifiedItem.originalOrderItems);
             }
         });
     }
@@ -80,7 +77,6 @@ public class OngCartItemAdapter extends RecyclerView.Adapter<OngCartItemAdapter.
             super(itemView);
             expirationDate = itemView.findViewById(R.id.text_individual_expiration);
             quantity = itemView.findViewById(R.id.text_individual_quantity);
-            // THE FIX: Use the correct ID from the layout file.
             actionButton = itemView.findViewById(R.id.button_add_individual_to_cart);
         }
     }

@@ -97,7 +97,6 @@ public class ConfigurationsEstablishmentActivity extends AppCompatActivity {
         editEstablishmentCnpj = findViewById(R.id.edit_establishment_cnpj);
         editEstablishmentName = findViewById(R.id.edit_establishment_name);
         editEstablishmentAddress = findViewById(R.id.edit_establishment_address);
-        // This ID will need to be changed in the XML layout file next.
         editEstablishmentContact = findViewById(R.id.edit_establishment_contact);
     }
 }

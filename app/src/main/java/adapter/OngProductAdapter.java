@@ -29,7 +29,7 @@ import fragment.OngListProductsFragment.GroupedStockItem;
 import model.OrderItem;
 import model.StockItem;
 
-// RE-ARCH: Implementing the quantity distribution logic when adding to cart.
+// RE-ARCH: Implementing the correct quantity distribution logic.
 public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.MyViewHolder> {
 
     private List<GroupedStockItem> productList;
@@ -39,7 +39,6 @@ public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.My
 
     private final List<Integer> placeholderImages;
 
-    // THE FIX: The listener now passes up a list of items to be added.
     public interface ProductInteractionListener {
         void onAddToCart(List<OrderItem> items);
     }
@@ -95,7 +94,7 @@ public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.My
 
         holder.expandableLayout.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
 
-        OngProductItemAdapter subAdapter = new OngProductItemAdapter(groupedProduct.getItems(), item -> showQuantityDialog(item, holder.getBindingAdapterPosition()));
+        OngProductItemAdapter subAdapter = new OngProductItemAdapter(groupedProduct.getItems(), item -> showQuantityDialog(item));
         holder.originsRecyclerView.setLayoutManager(new LinearLayoutManager(context));
         holder.originsRecyclerView.setAdapter(subAdapter);
         holder.originsRecyclerView.setNestedScrollingEnabled(false);
@@ -112,7 +111,7 @@ public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.My
         });
     }
 
-    private void showQuantityDialog(AggregatedStockItem aggregatedItem, int adapterPosition) {
+    private void showQuantityDialog(AggregatedStockItem aggregatedItem) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
         LayoutInflater inflater = LayoutInflater.from(context);
         View dialogView = inflater.inflate(R.layout.dialog_quantity, null);
@@ -144,6 +143,7 @@ public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.My
                     List<OrderItem> itemsToAddToCart = new ArrayList<>();
                     double remainingQuantityToFulfill = requestedQuantity;
 
+                    // Sort original items to consume from oldest first if needed, assuming they are pre-sorted
                     for (StockItem originalItem : aggregatedItem.getOriginalItems()) {
                         if (remainingQuantityToFulfill <= 0) break;
 
@@ -153,6 +153,7 @@ public class OngProductAdapter extends RecyclerView.Adapter<OngProductAdapter.My
                         orderItem.setProductId(originalItem.getProductId());
                         orderItem.setStockItemId(originalItem.getStockItemId());
                         orderItem.setOrderItemQuantity(quantityToTake);
+                        // Here you would also set other relevant snapshot data if you had it, e.g., expiration date
                         itemsToAddToCart.add(orderItem);
 
                         remainingQuantityToFulfill -= quantityToTake;

@@ -19,7 +19,6 @@ import fragment.EstablishmentNewProductFragment;
 import fragment.EstablishmentProfileFragment;
 import helper.ConfigurationFirebase;
 
-// RE-ARCH: Implementing the flexible, decoupled toolbar control abstraction.
 public class EstablishmentActivity extends AppCompatActivity {
 
     private FirebaseAuth authentication;

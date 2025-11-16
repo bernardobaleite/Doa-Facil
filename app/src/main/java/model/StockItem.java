@@ -3,7 +3,6 @@ package model;
 import com.google.firebase.database.DatabaseReference;
 import helper.ConfigurationFirebase;
 
-// ARCHITECTURE: Aligning StockItem with the user's superior data model.
 public class StockItem {
 
     private String stockItemId;
@@ -12,7 +11,7 @@ public class StockItem {
     private String stockItemExpirationDate;
     private String stockItemStatus;
     private long stockItemCreatedAt;
-    private String donationId; // Optional: Originating donation
+    private String donationId;
 
     public StockItem() {
     }
@@ -24,8 +23,6 @@ public class StockItem {
                 .child(this.getStockItemId());
         stockItemRef.setValue(this);
     }
-
-    // --- Getters and Setters ---
 
     public String getStockItemId() {
         return stockItemId;

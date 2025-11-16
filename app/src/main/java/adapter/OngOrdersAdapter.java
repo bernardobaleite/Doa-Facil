@@ -3,7 +3,6 @@ package adapter;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Context;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -21,11 +20,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.company.doafacil.R;
-import com.google.firebase.database.DataSnapshot;
-import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.MutableData;
-import com.google.firebase.database.Transaction;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -39,9 +34,8 @@ import java.util.Map;
 import helper.ConfigurationFirebase;
 import model.Order;
 import model.OrderItem;
-import model.StockItem;
 
-// RE-ARCH: Implementing the final, correct UI state logic as per user's command.
+// RE-ARCH: Aligning with the final "Calculated Truth" architecture.
 public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyViewHolder> {
 
     private List<Order> orders;
@@ -76,15 +70,14 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
         String status = order.getOrderStatus();
         int statusColor;
 
-        // THE FIX: Correctly show/hide form vs. status text.
         switch (status) {
             case "Realize o agendamento":
             case "Realize um novo agendamento":
                 holder.schedulingForm.setVisibility(View.VISIBLE);
                 holder.cancelButton.setVisibility(View.VISIBLE);
-                holder.cancelButton.setOnClickListener(v -> cancelOrder(order, false)); 
+                holder.cancelButton.setOnClickListener(v -> cancelOrder(order)); 
                 setupSchedulingControls(holder, order);
-                break; // Do not show status text when form is visible.
+                break; 
 
             case "Data e horários determinados - Por favor, aguarde a liberação":
                 statusColor = ContextCompat.getColor(context, R.color.status_warning_yellow);
@@ -165,44 +158,18 @@ public class OngOrdersAdapter extends RecyclerView.Adapter<OngOrdersAdapter.MyVi
         });
     }
 
-    private void cancelOrder(Order order, boolean mustReturnStock) {
-        if (!mustReturnStock) {
-            getOrderReference(order).child("orderStatus").setValue("Pedido cancelado")
-                    .addOnSuccessListener(aVoid -> Toast.makeText(context, "Pedido cancelado.", Toast.LENGTH_SHORT).show());
-            return;
-        }
-
-        for (OrderItem itemToReturn : order.getOrderItems().values()) {
-            returnStockForItem(itemToReturn);
-        }
-        getOrderReference(order).child("orderStatus").setValue("Pedido cancelado")
-                .addOnSuccessListener(aVoid -> Toast.makeText(context, "Pedido cancelado.", Toast.LENGTH_SHORT).show());
+    // THE FIX: Cancellation just changes the order status. The availability is recalculated automatically by the listener in OngListProductsFragment.
+    private void cancelOrder(Order order) {
+        updateOrderStatus(order, "Pedido cancelado", null);
     }
 
-    private void returnStockForItem(OrderItem itemToReturn) {
-        DatabaseReference stockItemRef = ConfigurationFirebase.getFirebaseDatabase()
-            .child("stock_items")
-            .child(itemToReturn.getStockItemId());
-
-        stockItemRef.runTransaction(new Transaction.Handler() {
-            @NonNull
-            @Override
-            public Transaction.Result doTransaction(@NonNull MutableData mutableData) {
-                StockItem currentStock = mutableData.getValue(StockItem.class);
-                if (currentStock == null) {
-                     return Transaction.abort();
-                }
-                double newQuantity = currentStock.getStockItemQuantity() + itemToReturn.getOrderItemQuantity();
-                currentStock.setStockItemQuantity(newQuantity);
-                mutableData.setValue(currentStock);
-                return Transaction.success(mutableData);
-            }
-
-            @Override
-            public void onComplete(@Nullable DatabaseError error, boolean committed, @Nullable DataSnapshot currentData) {
-                if (!committed) {
-                    Log.e("OngOrdersAdapter", "Stock return failed for item " + itemToReturn.getStockItemId());
-                }
+    private void updateOrderStatus(Order order, String newStatus, @Nullable Runnable onComplete) {
+        getOrderReference(order).child("orderStatus").setValue(newStatus).addOnCompleteListener(task -> {
+             if (task.isSuccessful()) {
+                Toast.makeText(context, "Status atualizado para: " + newStatus, Toast.LENGTH_SHORT).show();
+                 if(onComplete != null) onComplete.run();
+            } else {
+                Toast.makeText(context, "Falha ao atualizar status.", Toast.LENGTH_SHORT).show();
             }
         });
     }
